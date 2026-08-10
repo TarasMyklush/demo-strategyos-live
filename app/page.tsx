@@ -280,7 +280,7 @@ export default function Home() {
         </button>
         <div className="session-state" aria-label="Session status">
           <span className="status-dot" />
-          <span>{stage === "studio" ? "Private prototype · autosaved" : "Interactive product concept"}</span>
+          <span>{stage === "studio" ? "Private live session" : "Interactive product concept"}</span>
         </div>
         {stage === "studio" ? (
           <div className="top-actions">
@@ -398,7 +398,7 @@ export default function Home() {
               <form className="canvas-command" onSubmit={applyChange}>
                 <span aria-hidden="true">✦</span><label htmlFor="agent-change" className="sr-only">Change the selected logic block in plain language</label>
                 <input id="agent-change" value={draft} onChange={(event) => setDraft(event.target.value)} placeholder={`Or tell AI how to change “${logicNodes.find((node) => node.id === selectedNodeId)?.title}”`} />
-                <button type="submit">Apply with AI</button>
+                <button type="submit">Apply change</button>
               </form>
             </section>
 
