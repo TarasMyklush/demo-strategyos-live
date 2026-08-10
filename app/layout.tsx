@@ -27,7 +27,7 @@ export async function generateMetadata(): Promise<Metadata> {
     description:
       "A working vision for outcome-first AI agent creation: build first, ask only what cannot be inferred.",
     openGraph: {
-      title: "Your AI agent is already built.",
+      title: "Your Voice AI Agent",
       description:
         "Explore an outcome-first agent studio with evidence, live testing, and conversational refinement.",
       type: "website",
@@ -36,7 +36,7 @@ export async function generateMetadata(): Promise<Metadata> {
     },
     twitter: {
       card: "summary_large_image",
-      title: "Your AI agent is already built.",
+      title: "Your Voice AI Agent",
       description: "The 2027 alternative to setup wizards.",
       images: [`${origin}/og.png`],
     },

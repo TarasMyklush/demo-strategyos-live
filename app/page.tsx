@@ -89,7 +89,7 @@ export default function Home() {
           <div className="eyebrow">Outcome-first agent creation</div>
           <div className="hero-row">
             <div>
-              <h1>Your AI receptionist is already built.</h1>
+              <h1>Your Voice AI Agent is already built.</h1>
               <p className="hero-copy">
                 No setup form. I researched the business, created a working first version,
                 and surfaced only the decisions I could not safely infer.
