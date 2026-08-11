@@ -270,6 +270,7 @@ h1 { font-size:clamp(43px,5.1vw,76px); line-height:.98; letter-spacing:-.062em; 
 .live-transcript p.user { margin-left:18px; padding:6px 8px; border-radius:8px 8px 2px 8px; background:#eee8fb; }
 .live-transcript p.assistant { margin-right:18px; padding:6px 8px; border-radius:8px 8px 8px 2px; background:white; }
 .live-transcript .is-thinking { color:#857a91; animation:softBlink 1s ease-in-out infinite alternate; }
+.live-transcript .is-interim { color:#766b82; opacity:.72; }
 .live-transcript .chat-error { color:#b43f52; }
 @keyframes softBlink { to { opacity:.45; } }
 .studio-scenarios { margin:5px 0 13px; }
@@ -280,8 +281,13 @@ h1 { font-size:clamp(43px,5.1vw,76px); line-height:.98; letter-spacing:-.062em; 
 .live-chat-form button:disabled { opacity:.35; }
 .call-controls { display:flex; justify-content:center; align-items:center; gap:16px; margin-top:auto; }
 .call-controls button { width:46px; height:46px; display:grid; place-items:center; border:1px solid #e1dce8; border-radius:50%; background:white; color:#332b40; cursor:pointer; box-shadow:0 7px 20px rgba(47,28,82,.06); }
+.call-controls button:disabled { opacity:.32; cursor:not-allowed; }
+.call-controls .mic-toggle { font-size:16px; }
+.call-controls .mic-toggle.listening { border-color:#da4b63; background:#da4b63; color:white; animation:micPulse .8s ease-in-out infinite alternate; }
+@keyframes micPulse { to { box-shadow:0 0 0 9px rgba(218,75,99,.14); } }
 .call-controls .main-call { width:62px; height:62px; border:0; background:linear-gradient(145deg,#8256ee,#5c32d9); color:white; font-size:17px; box-shadow:0 13px 26px rgba(91,49,207,.27); }
 .call-controls .end-call { color:#e54343; font-size:19px; }
+.mic-status { min-height:16px; margin-top:8px; text-align:center; color:#7d7488; font-size:8px; }
 .test-foot { display:flex; justify-content:space-between; align-items:center; margin-top:20px; padding-top:12px; border-top:1px solid rgba(81,59,112,.13); }
 .test-foot span { color:#82788e; font-size:9px; }
 .test-foot button { border:0; background:transparent; color:var(--accent-dark); font-size:10px; font-weight:800; cursor:pointer; }

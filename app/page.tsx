@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 type Scenario = "opening" | "pricing" | "human" | "arabic";
 type Stage = "intake" | "building" | "studio";
@@ -22,6 +22,24 @@ type GeneratedAgent = {
   assumptions: string[];
   logic: Array<{ id: LogicId; title: string; description: string }>;
 };
+
+type RecognitionResultLike = { isFinal: boolean; [index: number]: { transcript: string } };
+type RecognitionEventLike = { resultIndex: number; results: { length: number; [index: number]: RecognitionResultLike } };
+type RecognitionErrorLike = { error: string; message?: string };
+type BrowserSpeechRecognition = {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  maxAlternatives: number;
+  onstart: (() => void) | null;
+  onresult: ((event: RecognitionEventLike) => void) | null;
+  onerror: ((event: RecognitionErrorLike) => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+  abort: () => void;
+};
+type SpeechRecognitionConstructor = new () => BrowserSpeechRecognition;
 
 type Business = {
   brief: string;
@@ -110,6 +128,11 @@ export default function Home() {
   const [chatError, setChatError] = useState("");
   const [availableVoices, setAvailableVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [selectedVoiceURI, setSelectedVoiceURI] = useState("");
+  const [micSupported, setMicSupported] = useState(false);
+  const [listening, setListening] = useState(false);
+  const [interimTranscript, setInterimTranscript] = useState("");
+  const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
+  const callingRef = useRef(false);
   const [showLaunch, setShowLaunch] = useState(false);
 
   useEffect(() => {
@@ -123,10 +146,25 @@ export default function Home() {
   }, [stage]);
 
   useEffect(() => {
+    callingRef.current = calling;
     if (!calling) return;
     const timer = window.setInterval(() => setSeconds((value) => value + 1), 1000);
     return () => window.clearInterval(timer);
   }, [calling]);
+
+  useEffect(() => {
+    const speechWindow = window as typeof window & {
+      SpeechRecognition?: SpeechRecognitionConstructor;
+      webkitSpeechRecognition?: SpeechRecognitionConstructor;
+    };
+    const capabilityCheck = window.requestAnimationFrame(() => {
+      setMicSupported(Boolean(speechWindow.SpeechRecognition || speechWindow.webkitSpeechRecognition));
+    });
+    return () => {
+      window.cancelAnimationFrame(capabilityCheck);
+      recognitionRef.current?.abort();
+    };
+  }, []);
 
   useEffect(() => {
     if (!("speechSynthesis" in window)) return;
@@ -202,6 +240,7 @@ export default function Home() {
   }
 
   function startCall() {
+    callingRef.current = true;
     setCalling(true);
     setSeconds(0);
     setScenario("opening");
@@ -210,13 +249,94 @@ export default function Home() {
   }
 
   function endCall() {
+    callingRef.current = false;
     setCalling(false);
     setSeconds(0);
+    stopListening();
     window.speechSynthesis?.cancel();
+  }
+
+  function speechRecognitionConstructor(): SpeechRecognitionConstructor | undefined {
+    const speechWindow = window as typeof window & {
+      SpeechRecognition?: SpeechRecognitionConstructor;
+      webkitSpeechRecognition?: SpeechRecognitionConstructor;
+    };
+    return speechWindow.SpeechRecognition || speechWindow.webkitSpeechRecognition;
+  }
+
+  function startListening() {
+    if (!callingRef.current) return;
+    const Recognition = speechRecognitionConstructor();
+    if (!Recognition) {
+      setChatError("Speech recognition is not available in this browser. Use typed chat instead.");
+      return;
+    }
+    window.speechSynthesis?.cancel();
+    recognitionRef.current?.abort();
+    const recognition = new Recognition();
+    recognition.continuous = false;
+    recognition.interimResults = true;
+    recognition.maxAlternatives = 1;
+    recognition.lang = availableVoices.find((voice) => voice.voiceURI === selectedVoiceURI)?.lang || navigator.language || "en-US";
+    recognition.onstart = () => {
+      setListening(true);
+      setChatError("");
+      setInterimTranscript("");
+    };
+    recognition.onresult = (event) => {
+      let finalText = "";
+      let interimText = "";
+      for (let index = event.resultIndex; index < event.results.length; index += 1) {
+        const transcript = event.results[index][0]?.transcript || "";
+        if (event.results[index].isFinal) finalText += transcript;
+        else interimText += transcript;
+      }
+      setInterimTranscript(interimText);
+      if (finalText.trim()) {
+        setInterimTranscript("");
+        recognition.stop();
+        void sendAgentMessage(finalText);
+      }
+    };
+    recognition.onerror = (event) => {
+      if (event.error === "aborted") return;
+      const messages: Record<string, string> = {
+        "not-allowed": "Microphone permission was denied. Allow it in the browser or use typed chat.",
+        "service-not-allowed": "Browser speech recognition is disabled. Use typed chat instead.",
+        "audio-capture": "No working microphone was found.",
+        "no-speech": "No speech was detected. Tap the microphone and try again.",
+        "network": "The browser speech service is unavailable. Use typed chat instead.",
+      };
+      setChatError(messages[event.error] || event.message || "The microphone could not start.");
+    };
+    recognition.onend = () => {
+      setListening(false);
+      setInterimTranscript("");
+      if (recognitionRef.current === recognition) recognitionRef.current = null;
+    };
+    recognitionRef.current = recognition;
+    try {
+      recognition.start();
+    } catch {
+      setChatError("The microphone is already active. Try again in a moment.");
+    }
+  }
+
+  function stopListening() {
+    recognitionRef.current?.abort();
+    recognitionRef.current = null;
+    setListening(false);
+    setInterimTranscript("");
+  }
+
+  function toggleListening() {
+    if (listening) stopListening();
+    else startListening();
   }
 
   function speak(text: string) {
     if (!("speechSynthesis" in window)) return;
+    stopListening();
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.voice = availableVoices.find((voice) => voice.voiceURI === selectedVoiceURI) || null;
     utterance.rate = 0.96;
@@ -456,6 +576,7 @@ export default function Home() {
               {calling ? (
                 <div className="live-transcript" aria-live="polite">
                   {liveMessages.map((line, index) => <p className={line.role} key={`${line.content}-${index}`}><strong>{line.role === "assistant" ? agentName : "You"}</strong>{line.content}</p>)}
+                  {interimTranscript && <p className="user is-interim"><strong>You · listening</strong>{interimTranscript}</p>}
                   {chatBusy && <p className="assistant is-thinking"><strong>{agentName}</strong>Thinking…</p>}
                   {chatError && <p className="chat-error"><strong>Connection</strong>{chatError}</p>}
                 </div>
@@ -467,7 +588,8 @@ export default function Home() {
                 <button type="button" disabled={chatBusy} aria-pressed={scenario === "arabic"} onClick={() => runScenario("arabic")}>Arabic</button>
               </div>
               {calling && <form className="live-chat-form" onSubmit={submitChat}><label className="sr-only" htmlFor="live-message">Talk to the agent</label><input id="live-message" value={chatInput} onChange={(event) => setChatInput(event.target.value)} placeholder="Type what you would say…" /><button type="submit" disabled={chatBusy || !chatInput.trim()}>Send</button></form>}
-              <div className="call-controls"><button type="button" aria-label="Mute">♩</button><button type="button" aria-label="Keypad">⠿</button><button className="main-call" type="button" onClick={calling ? endCall : startCall} aria-label={calling ? "End test call" : "Start test call"}>{calling ? "■" : "●"}</button><button className="end-call" type="button" onClick={endCall} aria-label="End call">⌁</button></div>
+              <div className="call-controls"><button className={`mic-toggle ${listening ? "listening" : ""}`} type="button" onClick={toggleListening} disabled={!calling || !micSupported} aria-label={listening ? "Stop microphone" : "Use microphone"}>🎙</button><button type="button" aria-label="Keypad">⠿</button><button className="main-call" type="button" onClick={calling ? endCall : startCall} aria-label={calling ? "End test call" : "Start test call"}>{calling ? "■" : "●"}</button><button className="end-call" type="button" onClick={endCall} aria-label="End call">⌁</button></div>
+              <div className="mic-status">{!micSupported ? "Microphone recognition unavailable · type below" : listening ? "Listening — speak now" : calling ? "Tap the microphone to speak" : "Start the test call first"}</div>
               <div className="test-foot"><span>{updates.length} edits in this session</span><button type="button" onClick={() => setShowLaunch(true)}>Approve agent →</button></div>
             </aside>
           </section>
