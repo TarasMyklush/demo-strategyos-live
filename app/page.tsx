@@ -108,6 +108,8 @@ export default function Home() {
   const [chatInput, setChatInput] = useState("");
   const [chatBusy, setChatBusy] = useState(false);
   const [chatError, setChatError] = useState("");
+  const [availableVoices, setAvailableVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const [selectedVoiceURI, setSelectedVoiceURI] = useState("");
   const [showLaunch, setShowLaunch] = useState(false);
 
   useEffect(() => {
@@ -125,6 +127,23 @@ export default function Home() {
     const timer = window.setInterval(() => setSeconds((value) => value + 1), 1000);
     return () => window.clearInterval(timer);
   }, [calling]);
+
+  useEffect(() => {
+    if (!("speechSynthesis" in window)) return;
+    const loadVoices = () => {
+      const voices = window.speechSynthesis.getVoices();
+      setAvailableVoices(voices);
+      setSelectedVoiceURI((current) => {
+        if (current && voices.some((voice) => voice.voiceURI === current)) return current;
+        const saved = window.localStorage.getItem("strategyos-voice") || "";
+        if (saved && voices.some((voice) => voice.voiceURI === saved)) return saved;
+        return voices.find((voice) => /^en[-_]/i.test(voice.lang))?.voiceURI || voices[0]?.voiceURI || "";
+      });
+    };
+    loadVoices();
+    window.speechSynthesis.addEventListener("voiceschanged", loadVoices);
+    return () => window.speechSynthesis.removeEventListener("voiceschanged", loadVoices);
+  }, []);
 
   const callTime = useMemo(() => {
     const minutes = Math.floor(seconds / 60).toString().padStart(2, "0");
@@ -187,13 +206,33 @@ export default function Home() {
     setSeconds(0);
     setScenario("opening");
     setLiveMessages([{ role: "assistant", content: openingLine }]);
-    window.speechSynthesis?.speak(new SpeechSynthesisUtterance(openingLine));
+    speak(openingLine);
   }
 
   function endCall() {
     setCalling(false);
     setSeconds(0);
     window.speechSynthesis?.cancel();
+  }
+
+  function speak(text: string) {
+    if (!("speechSynthesis" in window)) return;
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.voice = availableVoices.find((voice) => voice.voiceURI === selectedVoiceURI) || null;
+    utterance.rate = 0.96;
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(utterance);
+  }
+
+  function chooseVoice(voiceURI: string) {
+    setSelectedVoiceURI(voiceURI);
+    window.localStorage.setItem("strategyos-voice", voiceURI);
+    const voice = availableVoices.find((item) => item.voiceURI === voiceURI);
+    const preview = new SpeechSynthesisUtterance(`Hi, I’m ${agentName}. This is how I’ll sound.`);
+    preview.voice = voice || null;
+    preview.rate = 0.96;
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(preview);
   }
 
   function applyChange(event: FormEvent) {
@@ -245,7 +284,7 @@ export default function Home() {
       if (!response.ok) throw new Error(payload.detail || "The agent did not answer.");
       const reply = String(payload.reply || "I’m sorry, I could not answer that.");
       setLiveMessages((current) => [...current, { role: "assistant", content: reply }]);
-      window.speechSynthesis?.speak(new SpeechSynthesisUtterance(reply));
+      speak(reply);
     } catch (error) {
       setChatError(error instanceof Error ? error.message : "The agent did not answer.");
     } finally {
@@ -405,6 +444,12 @@ export default function Home() {
             <aside className={`live-test ${calling ? "is-calling" : ""}`} aria-label="Live agent test">
               <header className="live-header"><div><span className="live-pulse">⌁</span><strong>Live test</strong><i /></div><span>{callTime}</span></header>
               <div className="test-context"><span>{agentName} · {business.name}</span><small>{business.outcome}</small></div>
+              <div className="voice-picker">
+                <label htmlFor="agent-voice">Voice</label>
+                <select id="agent-voice" value={selectedVoiceURI} onChange={(event) => chooseVoice(event.target.value)} disabled={availableVoices.length === 0}>
+                  {availableVoices.length === 0 ? <option>Browser default</option> : availableVoices.map((voice) => <option key={voice.voiceURI} value={voice.voiceURI}>{voice.name} · {voice.lang}</option>)}
+                </select>
+              </div>
               <div className="voice-orb" aria-hidden="true"><span><i /><i /><i /><i /><i /><i /><i /><i /><i /></span></div>
               <div className="connected"><span>✓</span>{calling ? "Listening now" : "Connected"}</div>
 

@@ -27,9 +27,9 @@ body {
   text-rendering: optimizeLegibility;
 }
 
-button, input, textarea { font: inherit; }
+button, input, textarea, select { font: inherit; }
 button, a { -webkit-tap-highlight-color: transparent; }
-button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px solid rgba(117,81,234,.35); outline-offset: 3px; }
+button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 3px solid rgba(117,81,234,.35); outline-offset: 3px; }
 .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
 
 .studio-shell { min-height: 100vh; background: radial-gradient(circle at 68% -10%, rgba(169,136,255,.18), transparent 28%), #f5f2f8; }
@@ -252,6 +252,9 @@ h1 { font-size:clamp(43px,5.1vw,76px); line-height:.98; letter-spacing:-.062em; 
 .test-context span,.test-context small { display:block; }
 .test-context span { font-size:11px; font-weight:800; }
 .test-context small { max-width:320px; margin:4px auto 0; color:#7b7287; font-size:9px; line-height:1.4; }
+.voice-picker { width:min(290px,100%); display:grid; grid-template-columns:auto minmax(0,1fr); gap:8px; align-items:center; margin:12px auto -8px; padding:6px 7px 6px 10px; border:1px solid rgba(96,68,139,.14); border-radius:9px; background:rgba(255,255,255,.58); }
+.voice-picker label { color:#796f85; font-size:8px; text-transform:uppercase; letter-spacing:.08em; font-weight:850; }
+.voice-picker select { min-width:0; border:0; outline:0; background:transparent; color:#51485d; font-size:9px; cursor:pointer; }
 .voice-orb { width:210px; height:210px; margin:26px auto 10px; display:grid; place-items:center; border:1px solid rgba(124,78,233,.15); border-radius:50%; box-shadow:0 0 0 20px rgba(125,80,235,.045),0 0 0 41px rgba(125,80,235,.028); }
 .voice-orb > span { width:142px; height:142px; display:flex; justify-content:center; align-items:center; gap:4px; border-radius:50%; background:rgba(255,255,255,.94); box-shadow:0 15px 40px rgba(76,43,139,.13); }
 .voice-orb i { width:3px; height:20px; border-radius:3px; background:#7046e7; }
