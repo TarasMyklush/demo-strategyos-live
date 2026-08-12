@@ -1,9 +1,12 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 type Scenario = "opening" | "pricing" | "human" | "arabic";
 type Stage = "intake" | "building" | "studio";
+type StudioView = "logic" | "configure";
+type AgentChannel = "Inbound phone" | "Outbound phone" | "Website voice + text" | "Combination";
+type VoiceGender = "Female" | "Male";
 type LogicId = "trigger" | "understand" | "retrieve" | "decide" | "respond" | "complete";
 
 type LogicNode = {
@@ -64,6 +67,37 @@ const buildSteps = [
 
 const studioApi = "https://strategyos.live/public/agent-studio";
 const logicIcons: Record<LogicId, string> = { trigger: "ϟ", understand: "◎", retrieve: "⌕", decide: "⌘", respond: "➤", complete: "✓" };
+
+const channelOptions: Array<{ name: AgentChannel; detail: string }> = [
+  { name: "Inbound phone", detail: "Answer, qualify, book and escalate" },
+  { name: "Outbound phone", detail: "Call leads, follow up and sell" },
+  { name: "Website voice + text", detail: "Voice and chat widget for your site" },
+  { name: "Combination", detail: "Multiple channels with shared memory" },
+];
+
+const languageOptions = ["English", "Español", "Français", "Deutsch", "Italiano", "Português", "中文", "日本語", "한국어", "हिन्दी", "العربية (MSA)", "العربية · Gulf", "العربية · Najdi", "Русский", "Türkçe"];
+const voicePersonas: Record<VoiceGender, Array<{ name: string; tone: string }>> = {
+  Female: [
+    { name: "Sara", tone: "Warm, professional · Gulf-tuned" },
+    { name: "Yasmin", tone: "Crisp, clear · Najdi-tuned" },
+    { name: "Jessica", tone: "Friendly, energetic · Generic" },
+    { name: "Aria", tone: "Composed, formal · Generic" },
+    { name: "Layla", tone: "Calm, conversational · Generic" },
+  ],
+  Male: [
+    { name: "Khalid", tone: "Authoritative · Gulf-tuned" },
+    { name: "Rashid", tone: "Reassuring · Najdi-tuned" },
+    { name: "Marcus", tone: "Crisp, sales-trained · Generic" },
+    { name: "Daniel", tone: "Calm, support-trained · Generic" },
+    { name: "Omar", tone: "Friendly, conversational · Generic" },
+  ],
+};
+
+function subtypesFor(channel: AgentChannel) {
+  if (channel === "Outbound phone") return ["Lead qualification", "Outbound sales"];
+  if (channel === "Combination") return ["Multichannel orchestration"];
+  return ["Q&A", "Customer support", "Receptionist + sales"];
+}
 
 function makeLogic(business: Business): LogicNode[] {
   return [
@@ -134,6 +168,23 @@ export default function Home() {
   const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
   const callingRef = useRef(false);
   const [showLaunch, setShowLaunch] = useState(false);
+  const [studioView, setStudioView] = useState<StudioView>("logic");
+  const [ownerName, setOwnerName] = useState("");
+  const [ownerEmail, setOwnerEmail] = useState("");
+  const [ownerPhone, setOwnerPhone] = useState("");
+  const [companyName, setCompanyName] = useState("");
+  const [websiteUrl, setWebsiteUrl] = useState("");
+  const [companyDescription, setCompanyDescription] = useState("");
+  const [additionalKnowledge, setAdditionalKnowledge] = useState("");
+  const [knowledgeFiles, setKnowledgeFiles] = useState<string[]>([]);
+  const [agentChannel, setAgentChannel] = useState<AgentChannel>("Inbound phone");
+  const [agentSubtype, setAgentSubtype] = useState("Receptionist + sales");
+  const [optionalFeatures, setOptionalFeatures] = useState<string[]>(["Email orders to your inbox"]);
+  const [customFlows, setCustomFlows] = useState("");
+  const [languages, setLanguages] = useState<string[]>(["English"]);
+  const [voiceGender, setVoiceGender] = useState<VoiceGender>("Female");
+  const [voicePersona, setVoicePersona] = useState("Sara");
+  const [avatarChoice, setAvatarChoice] = useState(1);
 
   useEffect(() => {
     if (stage !== "building") return;
@@ -189,6 +240,24 @@ export default function Home() {
     return `${minutes}:${remaining}`;
   }, [seconds]);
 
+  const configuredContext = useMemo(() => [
+    `Primary outcome: ${business.outcome}`,
+    `Agent channel: ${agentChannel}`,
+    `Agent role: ${agentSubtype}`,
+    `Languages: ${languages.join(", ")}`,
+    `Persona: ${voicePersona} (${voiceGender})`,
+    companyDescription ? `Company description: ${companyDescription}` : "",
+    additionalKnowledge ? `Additional approved knowledge: ${additionalKnowledge}` : "",
+    optionalFeatures.length ? `Enabled features: ${optionalFeatures.join(", ")}` : "",
+    customFlows ? `Conversation rules: ${customFlows}` : "",
+  ].filter(Boolean).join("\n"), [business.outcome, agentChannel, agentSubtype, languages, voicePersona, voiceGender, companyDescription, additionalKnowledge, optionalFeatures, customFlows]);
+
+  const compatibleFeatureOptions = agentSubtype === "Customer support"
+    ? ["Escalate to human operator"]
+    : agentSubtype === "Receptionist + sales"
+      ? ["Email orders to your inbox"]
+      : [];
+
   async function createAgent(event: FormEvent) {
     event.preventDefault();
     const cleanBrief = brief.trim();
@@ -222,6 +291,12 @@ export default function Home() {
       setAgentSummary(generated.summary || `Designed to ${nextBusiness.outcome}`);
       setOpeningLine(generated.opening_line || "Hello, how can I help today?");
       setAssumptions(generated.assumptions || []);
+      setCompanyName(nextBusiness.name);
+      setWebsiteUrl(nextBusiness.url);
+      setCompanyDescription(generated.summary || `Designed to ${nextBusiness.outcome}`);
+      setAdditionalKnowledge((generated.assumptions || []).join("\n"));
+      setKnowledgeFiles([]);
+      setStudioView("logic");
       setLiveMessages([]);
       setStage("studio");
     } catch (error) {
@@ -237,6 +312,7 @@ export default function Home() {
     setGenerationError("");
     setLiveMessages([]);
     setShowLaunch(false);
+    setStudioView("logic");
   }
 
   function startCall() {
@@ -379,6 +455,54 @@ export default function Home() {
     setUpdates((current) => [`${logicNodes.find((node) => node.id === selectedNodeId)?.title}: ${change}`, ...current]);
   }
 
+  function chooseChannel(channel: AgentChannel) {
+    setAgentChannel(channel);
+    const nextSubtype = subtypesFor(channel)[0];
+    setAgentSubtype(nextSubtype);
+    setOptionalFeatures([]);
+  }
+
+  function chooseSubtype(subtype: string) {
+    setAgentSubtype(subtype);
+    setOptionalFeatures([]);
+  }
+
+  function toggleFeature(feature: string) {
+    setOptionalFeatures((current) => current.includes(feature) ? current.filter((item) => item !== feature) : [...current, feature]);
+  }
+
+  function toggleLanguage(language: string) {
+    setLanguages((current) => {
+      if (current.includes(language)) return current.length === 1 ? current : current.filter((item) => item !== language);
+      return [...current, language];
+    });
+  }
+
+  async function attachKnowledge(event: ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.target.files || []);
+    if (!files.length) return;
+    setKnowledgeFiles((current) => [...current, ...files.map((file) => file.name)].slice(-8));
+    const readable = files.filter((file) => file.type.startsWith("text/") || /\.(txt|md)$/i.test(file.name));
+    if (readable.length) {
+      const contents = await Promise.all(readable.map(async (file) => `\n\n[${file.name}]\n${(await file.text()).slice(0, 16000)}`));
+      setAdditionalKnowledge((current) => `${current}${contents.join("")}`.trim());
+    }
+    event.target.value = "";
+  }
+
+  function saveConfiguration(event: FormEvent) {
+    event.preventDefault();
+    const urlBusiness = parseBusiness(`${websiteUrl || business.url} — ${business.outcome}`);
+    setBusiness((current) => ({
+      ...current,
+      host: urlBusiness.host,
+      url: urlBusiness.url,
+      name: companyName.trim() || current.name,
+    }));
+    setUpdates((current) => [`Control Center: ${agentChannel}, ${agentSubtype}, ${languages.join(" + ")}`, ...current]);
+    setStudioView("logic");
+  }
+
   async function sendAgentMessage(message: string) {
     const clean = message.trim();
     if (!clean || chatBusy) return;
@@ -393,8 +517,8 @@ export default function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          business_name: business.name,
-          outcome: business.outcome,
+          business_name: `${companyName || business.name}; agent name: ${agentName}`,
+          outcome: configuredContext,
           logic: logicNodes.map(({ id, title, description }) => ({ id, title, description })),
           messages: history,
           user_message: clean,
@@ -515,21 +639,22 @@ export default function Home() {
         <>
           <section className="flow-studio" id="top">
             <aside className="tool-rail" aria-label="Agent studio navigation">
-              <button className="rail-primary" type="button" aria-label="AI builder">✦</button>
-              <button className="active" type="button" aria-label="Conversation logic">⌘</button>
-              <button type="button" aria-label="Knowledge">▤</button>
-              <button type="button" aria-label="Data sources">◉</button>
-              <button type="button" aria-label="Integrations">⌯</button>
+              <button className={`rail-primary ${studioView === "configure" ? "active" : ""}`} type="button" aria-label="Open agent Control Center" title="Control Center" onClick={() => setStudioView("configure")}>✦</button>
+              <button className={studioView === "logic" ? "active" : ""} type="button" aria-label="Conversation logic" title="Conversation logic" onClick={() => setStudioView("logic")}>⌘</button>
+              <button type="button" aria-label="Edit knowledge" title="Knowledge" onClick={() => setStudioView("configure")}>▤</button>
+              <button type="button" aria-label="Edit agent type" title="Agent type" onClick={() => setStudioView("configure")}>◉</button>
+              <button type="button" aria-label="Edit conversation flows" title="Conversation flows" onClick={() => setStudioView("configure")}>⌯</button>
               <span />
-              <button type="button" aria-label="Settings">⚙</button>
+              <button type="button" aria-label="Edit voice and settings" title="Voice and settings" onClick={() => setStudioView("configure")}>⚙</button>
             </aside>
 
-            <section className="logic-canvas" aria-label="Editable conversation logic">
+            <section className={`logic-canvas ${studioView === "configure" ? "config-mode" : ""}`} aria-label={studioView === "logic" ? "Editable conversation logic" : "Complete agent configuration"}>
               <header className="canvas-header">
-                <div><span className="canvas-kicker">Generated from {business.host} · {agentName}</span><h1>Your Voice AI Agent</h1><p className="agent-summary">{agentSummary}</p></div>
-                <div className="canvas-status"><span>v1</span><strong>All logic visible</strong><small>{assumptions.length} assumptions · click any block to edit</small></div>
+                <div><span className="canvas-kicker">Generated from {business.host} · {agentName}</span><h1>{studioView === "logic" ? "Your Voice AI Agent" : "Agent Control Center"}</h1><p className="agent-summary">{studioView === "logic" ? agentSummary : "Every wizard control, editable here without leaving the studio."}</p></div>
+                {studioView === "logic" ? <div className="canvas-status"><span>v1</span><strong>All logic visible</strong><small>{assumptions.length} assumptions · click any block to edit</small></div> : <button className="back-to-logic" type="button" onClick={() => setStudioView("logic")}>View logic →</button>}
               </header>
 
+              {studioView === "logic" ? <>
               <div className="flow-map">
                 <div className="flow-column top-flow">
                   {logicNodes.filter((node) => node.id === "trigger").map((node) => <button key={node.id} type="button" className={`logic-node ${selectedNodeId === node.id ? "selected" : ""}`} onClick={() => selectNode(node.id)}><i>{node.icon}</i><span><strong>{node.title}</strong><small>{node.description}</small></span><b>●</b></button>)}
@@ -559,6 +684,65 @@ export default function Home() {
                 <input id="agent-change" value={draft} onChange={(event) => setDraft(event.target.value)} placeholder={`Or tell AI how to change “${logicNodes.find((node) => node.id === selectedNodeId)?.title}”`} />
                 <button type="submit">Apply change</button>
               </form>
+              </> : (
+                <form className="control-center" onSubmit={saveConfiguration}>
+                  <div className="control-intro"><span>One workspace · zero steps</span><strong>Change anything. Test the result immediately.</strong><small>These settings are included in every live DeepSeek conversation.</small></div>
+
+                  <section className="config-section">
+                    <header><span>01</span><div><strong>Owner &amp; business</strong><small>Contact details from the original “You” step</small></div></header>
+                    <div className="config-grid two">
+                      <label><span>Full name</span><input value={ownerName} onChange={(event) => setOwnerName(event.target.value)} placeholder="Jane Doe" /></label>
+                      <label><span>Work email</span><input type="email" value={ownerEmail} onChange={(event) => setOwnerEmail(event.target.value)} placeholder="jane@company.com" /></label>
+                      <label><span>Phone <i>optional</i></span><input type="tel" value={ownerPhone} onChange={(event) => setOwnerPhone(event.target.value)} placeholder="+1 555 123 4567" /></label>
+                      <label><span>Company</span><input value={companyName} onChange={(event) => setCompanyName(event.target.value)} placeholder={business.name} /></label>
+                    </div>
+                  </section>
+
+                  <section className="config-section">
+                    <header><span>02</span><div><strong>Knowledge</strong><small>Website context, editable description and documents</small></div></header>
+                    <div className="config-grid">
+                      <label><span>Website URL</span><input type="url" value={websiteUrl} onChange={(event) => setWebsiteUrl(event.target.value)} placeholder="https://yourcompany.com" /></label>
+                      <label><span>Primary outcome</span><input value={business.outcome} onChange={(event) => setBusiness((current) => ({ ...current, outcome: event.target.value }))} /></label>
+                      <label><span>Company description</span><textarea value={companyDescription} onChange={(event) => setCompanyDescription(event.target.value)} rows={3} placeholder="Services, pricing, hours, locations and common questions…" /></label>
+                      <label><span>Additional approved knowledge</span><textarea value={additionalKnowledge} onChange={(event) => setAdditionalKnowledge(event.target.value)} rows={4} placeholder="Paste FAQs, policies, pricing or training notes…" /></label>
+                      <label className="file-drop"><span>Attach knowledge files</span><input type="file" accept=".pdf,.txt,.md,.docx,text/plain,text/markdown,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" multiple onChange={attachKnowledge} /><b>＋ Add PDF, TXT, MD or DOCX</b><small>TXT and MD content is added immediately; other files stay attached to this prototype.</small></label>
+                      {knowledgeFiles.length > 0 && <div className="file-chips">{knowledgeFiles.map((file) => <span key={file}>✓ {file}</span>)}</div>}
+                    </div>
+                  </section>
+
+                  <section className="config-section">
+                    <header><span>03</span><div><strong>Agent type</strong><small>Channel, job and optional behavior</small></div></header>
+                    <div className="channel-grid">
+                      {channelOptions.map((channel) => <button type="button" key={channel.name} className={agentChannel === channel.name ? "selected" : ""} onClick={() => chooseChannel(channel.name)}><strong>{channel.name}</strong><small>{channel.detail}</small></button>)}
+                    </div>
+                    <div className="config-subgroup"><span>Sub-type</span><div className="choice-row">{subtypesFor(agentChannel).map((subtype) => <button type="button" key={subtype} className={agentSubtype === subtype ? "selected" : ""} onClick={() => chooseSubtype(subtype)}>{subtype}</button>)}</div></div>
+                    {compatibleFeatureOptions.length > 0 && <div className="config-subgroup"><span>Optional features</span>{compatibleFeatureOptions.map((feature) => <div className="check-card" key={feature}><input type="checkbox" aria-label={feature} checked={optionalFeatures.includes(feature)} onChange={() => toggleFeature(feature)} /><div><strong>{feature}</strong><small>{feature.startsWith("Escalate") ? "Warm-transfer when the caller asks for a person or the agent cannot resolve the issue." : "Send committed order or service details to your team."}</small></div></div>)}</div>}
+                  </section>
+
+                  <section className="config-section">
+                    <header><span>04</span><div><strong>Conversation flows</strong><small>Plain-English rules for specific scenarios</small></div></header>
+                    <label className="full-field"><span>Custom flows</span><textarea value={customFlows} onChange={(event) => setCustomFlows(event.target.value)} rows={5} placeholder={'If user asks about pricing → explain the starting price, qualify budget, then route to sales.\nIf user is angry → stay calm, acknowledge the issue, then offer a human transfer.'} /></label>
+                    <div className="pattern-hints"><span>Off-topic</span><span>Angry caller</span><span>Identity checks</span><span>Compliance</span><span>VIP customers</span></div>
+                  </section>
+
+                  <section className="config-section">
+                    <header><span>05</span><div><strong>Voice &amp; persona</strong><small>Languages, gender, named voice, avatar and greeting</small></div></header>
+                    <div className="config-subgroup"><span>Languages</span><div className="language-grid">{languageOptions.map((language) => <button type="button" key={language} className={languages.includes(language) ? "selected" : ""} aria-pressed={languages.includes(language)} onClick={() => toggleLanguage(language)}>{language}</button>)}</div></div>
+                    <div className="config-subgroup"><span>Gender</span><div className="choice-row">{(["Female", "Male"] as VoiceGender[]).map((gender) => <button type="button" key={gender} className={voiceGender === gender ? "selected" : ""} onClick={() => { setVoiceGender(gender); setVoicePersona(voicePersonas[gender][0].name); setAvatarChoice(1); }}>{gender} voice + avatar</button>)}</div></div>
+                    <div className="persona-grid">{voicePersonas[voiceGender].map((persona) => <button type="button" key={persona.name} className={voicePersona === persona.name ? "selected" : ""} onClick={() => setVoicePersona(persona.name)}><strong>{persona.name}</strong><small>{persona.tone}</small></button>)}</div>
+                    <div className="persona-row">
+                      <div className="avatar-picker"><span>Avatar</span><div>{Array.from({ length: voiceGender === "Female" ? 8 : 4 }, (_, index) => <button type="button" key={index} className={avatarChoice === index + 1 ? "selected" : ""} onClick={() => setAvatarChoice(index + 1)} aria-label={`Avatar ${index + 1}`}><b>{voicePersona.slice(0, 1)}</b></button>)}</div></div>
+                      <div className="config-grid two compact">
+                        <label><span>Agent name</span><input value={agentName} onChange={(event) => setAgentName(event.target.value)} placeholder="Sara from Acme" /></label>
+                        <label><span>Browser voice</span><select value={selectedVoiceURI} onChange={(event) => chooseVoice(event.target.value)} disabled={availableVoices.length === 0}>{availableVoices.length === 0 ? <option>Browser default</option> : availableVoices.map((voice) => <option key={voice.voiceURI} value={voice.voiceURI}>{voice.name} · {voice.lang}</option>)}</select></label>
+                      </div>
+                    </div>
+                    <label className="full-field"><span>Opening line</span><textarea value={openingLine} onChange={(event) => setOpeningLine(event.target.value)} rows={2} /></label>
+                  </section>
+
+                  <footer className="control-actions"><span>{languages.length} languages · {knowledgeFiles.length} files · {optionalFeatures.length} optional features</span><button type="submit">Save &amp; view logic →</button></footer>
+                </form>
+              )}
             </section>
 
             <aside className={`live-test ${calling ? "is-calling" : ""}`} aria-label="Live agent test">
