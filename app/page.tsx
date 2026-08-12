@@ -7,6 +7,7 @@ type Stage = "intake" | "building" | "studio";
 type StudioView = "logic" | "configure";
 type AgentChannel = "Inbound phone" | "Outbound phone" | "Website voice + text" | "Combination";
 type VoiceGender = "Female" | "Male";
+type Notice = { kind: "success" | "info" | "error"; message: string };
 type LogicId = "trigger" | "understand" | "retrieve" | "decide" | "respond" | "complete";
 
 type LogicNode = {
@@ -165,7 +166,6 @@ export default function Home() {
   const [calling, setCalling] = useState(false);
   const [seconds, setSeconds] = useState(0);
   const [scenario, setScenario] = useState<Scenario>("opening");
-  const [draft, setDraft] = useState("");
   const [updates, setUpdates] = useState<string[]>([]);
   const [logicNodes, setLogicNodes] = useState<LogicNode[]>(() => makeLogic(parseBusiness("nextlevel.ai — qualify inbound leads and book a consultation")));
   const [selectedNodeId, setSelectedNodeId] = useState<LogicId>("understand");
@@ -186,6 +186,8 @@ export default function Home() {
   const [interimTranscript, setInterimTranscript] = useState("");
   const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
   const callingRef = useRef(false);
+  const noticeTimerRef = useRef<number | null>(null);
+  const [notice, setNotice] = useState<Notice | null>(null);
   const [showLaunch, setShowLaunch] = useState(false);
   const [studioView, setStudioView] = useState<StudioView>("logic");
   const [ownerName, setOwnerName] = useState("");
@@ -233,6 +235,7 @@ export default function Home() {
     return () => {
       window.cancelAnimationFrame(capabilityCheck);
       recognitionRef.current?.abort();
+      if (noticeTimerRef.current) window.clearTimeout(noticeTimerRef.current);
     };
   }, []);
 
@@ -278,6 +281,14 @@ export default function Home() {
       : [];
 
   const selectedAvatar = avatarOptions[voiceGender][avatarChoice - 1] || avatarOptions[voiceGender][0];
+  const selectedNode = logicNodes.find((node) => node.id === selectedNodeId);
+  const nodeHasChanges = Boolean(nodeDraft.trim()) && nodeDraft.trim() !== selectedNode?.description;
+
+  function showNotice(message: string, kind: Notice["kind"] = "success") {
+    if (noticeTimerRef.current) window.clearTimeout(noticeTimerRef.current);
+    setNotice({ message, kind });
+    noticeTimerRef.current = window.setTimeout(() => setNotice(null), 2800);
+  }
 
   async function createAgent(event: FormEvent) {
     event.preventDefault();
@@ -326,6 +337,9 @@ export default function Home() {
   }
 
   function startOver() {
+    callingRef.current = false;
+    stopListening();
+    window.speechSynthesis?.cancel();
     setStage("intake");
     setBrief("");
     setCalling(false);
@@ -343,6 +357,7 @@ export default function Home() {
     setScenario("opening");
     setLiveMessages([{ role: "assistant", content: openingLine }]);
     speak(openingLine);
+    showNotice("Live test started. Type a message or tap Speak.", "info");
   }
 
   function endCall() {
@@ -351,6 +366,7 @@ export default function Home() {
     setSeconds(0);
     stopListening();
     window.speechSynthesis?.cancel();
+    showNotice("Live test ended.", "info");
   }
 
   function speechRecognitionConstructor(): SpeechRecognitionConstructor | undefined {
@@ -379,6 +395,7 @@ export default function Home() {
       setListening(true);
       setChatError("");
       setInterimTranscript("");
+      showNotice("Microphone is listening now.", "info");
     };
     recognition.onresult = (event) => {
       let finalText = "";
@@ -405,6 +422,7 @@ export default function Home() {
         "network": "The browser speech service is unavailable. Use typed chat instead.",
       };
       setChatError(messages[event.error] || event.message || "The microphone could not start.");
+      showNotice(messages[event.error] || event.message || "The microphone could not start.", "error");
     };
     recognition.onend = () => {
       setListening(false);
@@ -450,30 +468,23 @@ export default function Home() {
     preview.rate = 0.96;
     window.speechSynthesis.cancel();
     window.speechSynthesis.speak(preview);
-  }
-
-  function applyChange(event: FormEvent) {
-    event.preventDefault();
-    const change = draft.trim();
-    if (!change) return;
-    setUpdates((current) => [change, ...current]);
-    setLogicNodes((current) => current.map((node) => node.id === selectedNodeId ? { ...node, description: change } : node));
-    setNodeDraft(change);
-    setDraft("");
+    showNotice(`Playback voice changed to ${voice?.name || "browser default"}.`, "info");
   }
 
   function selectNode(id: LogicId) {
     const node = logicNodes.find((item) => item.id === id);
     setSelectedNodeId(id);
     setNodeDraft(node?.description || "");
+    showNotice(`${node?.title || "Logic block"} selected. Edit it below.`, "info");
   }
 
   function saveNode(event: FormEvent) {
     event.preventDefault();
     const change = nodeDraft.trim();
-    if (!change) return;
+    if (!change || !nodeHasChanges) return;
     setLogicNodes((current) => current.map((node) => node.id === selectedNodeId ? { ...node, description: change } : node));
     setUpdates((current) => [`${logicNodes.find((node) => node.id === selectedNodeId)?.title}: ${change}`, ...current]);
+    showNotice(`${selectedNode?.title || "Logic block"} saved. The live test now uses it.`);
   }
 
   function chooseChannel(channel: AgentChannel) {
@@ -493,10 +504,11 @@ export default function Home() {
   }
 
   function toggleLanguage(language: string) {
-    setLanguages((current) => {
-      if (current.includes(language)) return current.length === 1 ? current : current.filter((item) => item !== language);
-      return [...current, language];
-    });
+    if (languages.includes(language) && languages.length === 1) {
+      showNotice("Your agent needs at least one language.", "info");
+      return;
+    }
+    setLanguages((current) => current.includes(language) ? current.filter((item) => item !== language) : [...current, language]);
   }
 
   async function attachKnowledge(event: ChangeEvent<HTMLInputElement>) {
@@ -509,6 +521,7 @@ export default function Home() {
       setAdditionalKnowledge((current) => `${current}${contents.join("")}`.trim());
     }
     event.target.value = "";
+    showNotice(`${files.length} knowledge file${files.length === 1 ? "" : "s"} attached.`);
   }
 
   function saveConfiguration(event: FormEvent) {
@@ -522,6 +535,7 @@ export default function Home() {
     }));
     setUpdates((current) => [`Control Center: ${agentChannel}, ${agentSubtype}, ${languages.join(" + ")}`, ...current]);
     setStudioView("logic");
+    showNotice("Agent settings saved. The live test is updated.");
   }
 
   async function sendAgentMessage(message: string) {
@@ -552,6 +566,7 @@ export default function Home() {
       speak(reply);
     } catch (error) {
       setChatError(error instanceof Error ? error.message : "The agent did not answer.");
+      showNotice(error instanceof Error ? error.message : "The agent did not answer.", "error");
     } finally {
       setChatBusy(false);
     }
@@ -672,7 +687,7 @@ export default function Home() {
               </header>
 
               {studioView === "logic" ? <>
-              <div className="edit-guidance" role="note"><span>✦</span><div><strong>This agent is fully editable.</strong><small>Click any block below to change its behavior, or open <b>Edit agent</b> for knowledge, channels, flows, languages, voice and persona.</small></div><button type="button" onClick={() => setStudioView("configure")}>Edit full agent →</button></div>
+              <div className="edit-guidance" role="note"><span>✦</span><div><strong>How to use this studio</strong><small><b>1</b> Select a block · <b>2</b> Edit its sentence below · <b>3</b> Save changes · <b>4</b> Start a live test</small></div><button type="button" onClick={() => setStudioView("configure")}>Edit full agent →</button></div>
               <div className="flow-map">
                 <div className="flow-column top-flow">
                   {logicNodes.filter((node) => node.id === "trigger").map((node) => <button key={node.id} type="button" className={`logic-node ${selectedNodeId === node.id ? "selected" : ""}`} onClick={() => selectNode(node.id)}><i>{node.icon}</i><span><strong>{node.title}</strong><small>{node.description}</small></span><b>●</b></button>)}
@@ -691,16 +706,10 @@ export default function Home() {
               </div>
 
               <form className="node-editor" onSubmit={saveNode}>
-                <div className="editor-title"><span>Edit logic</span><strong>{logicNodes.find((node) => node.id === selectedNodeId)?.title}</strong></div>
+                <div className="editor-title"><span>Selected block</span><strong>{selectedNode?.title}</strong><small>Edit the text →</small></div>
                 <label htmlFor="node-logic" className="sr-only">Behavior for selected logic block</label>
                 <input id="node-logic" value={nodeDraft} onChange={(event) => setNodeDraft(event.target.value)} />
-                <button type="submit">Save block</button>
-              </form>
-
-              <form className="canvas-command" onSubmit={applyChange}>
-                <span aria-hidden="true">✦</span><label htmlFor="agent-change" className="sr-only">Change the selected logic block in plain language</label>
-                <input id="agent-change" value={draft} onChange={(event) => setDraft(event.target.value)} placeholder={`Or tell AI how to change “${logicNodes.find((node) => node.id === selectedNodeId)?.title}”`} />
-                <button type="submit">Apply change</button>
+                <button type="submit" disabled={!nodeHasChanges}>{nodeHasChanges ? "Save changes" : "Saved ✓"}</button>
               </form>
               </> : (
                 <form className="control-center" onSubmit={saveConfiguration}>
@@ -731,9 +740,9 @@ export default function Home() {
                   <section className="config-section">
                     <header><span>03</span><div><strong>Agent type</strong><small>Channel, job and optional behavior</small></div></header>
                     <div className="channel-grid">
-                      {channelOptions.map((channel) => <button type="button" key={channel.name} className={agentChannel === channel.name ? "selected" : ""} onClick={() => chooseChannel(channel.name)}><strong>{channel.name}</strong><small>{channel.detail}</small></button>)}
+                      {channelOptions.map((channel) => <button type="button" key={channel.name} className={agentChannel === channel.name ? "selected" : ""} aria-pressed={agentChannel === channel.name} onClick={() => chooseChannel(channel.name)}><strong>{channel.name}</strong><small>{channel.detail}</small></button>)}
                     </div>
-                    <div className="config-subgroup"><span>Sub-type</span><div className="choice-row">{subtypesFor(agentChannel).map((subtype) => <button type="button" key={subtype} className={agentSubtype === subtype ? "selected" : ""} onClick={() => chooseSubtype(subtype)}>{subtype}</button>)}</div></div>
+                    <div className="config-subgroup"><span>Sub-type</span><div className="choice-row">{subtypesFor(agentChannel).map((subtype) => <button type="button" key={subtype} className={agentSubtype === subtype ? "selected" : ""} aria-pressed={agentSubtype === subtype} onClick={() => chooseSubtype(subtype)}>{subtype}</button>)}</div></div>
                     {compatibleFeatureOptions.length > 0 && <div className="config-subgroup"><span>Optional features</span>{compatibleFeatureOptions.map((feature) => <div className="check-card" key={feature}><input type="checkbox" aria-label={feature} checked={optionalFeatures.includes(feature)} onChange={() => toggleFeature(feature)} /><div><strong>{feature}</strong><small>{feature.startsWith("Escalate") ? "Warm-transfer when the caller asks for a person or the agent cannot resolve the issue." : "Send committed order or service details to your team."}</small></div></div>)}</div>}
                   </section>
 
@@ -746,8 +755,8 @@ export default function Home() {
                   <section className="config-section">
                     <header><span>05</span><div><strong>Voice &amp; persona</strong><small>Languages, gender, named voice, avatar and greeting</small></div></header>
                     <div className="config-subgroup"><span>Languages</span><div className="language-grid">{languageOptions.map((language) => <button type="button" key={language} className={languages.includes(language) ? "selected" : ""} aria-pressed={languages.includes(language)} onClick={() => toggleLanguage(language)}>{language}</button>)}</div></div>
-                    <div className="config-subgroup"><span>Gender</span><div className="choice-row">{(["Female", "Male"] as VoiceGender[]).map((gender) => <button type="button" key={gender} className={voiceGender === gender ? "selected" : ""} onClick={() => { setVoiceGender(gender); setVoicePersona(voicePersonas[gender][0].name); setAvatarChoice(1); }}>{gender} voice + avatar</button>)}</div></div>
-                    <div className="config-subgroup"><span>Voice persona</span><div className="persona-grid">{voicePersonas[voiceGender].map((persona) => <button type="button" key={persona.name} className={voicePersona === persona.name ? "selected" : ""} onClick={() => setVoicePersona(persona.name)}><strong>{persona.name}</strong><small>{persona.tone}</small></button>)}</div></div>
+                    <div className="config-subgroup"><span>Gender</span><div className="choice-row">{(["Female", "Male"] as VoiceGender[]).map((gender) => <button type="button" key={gender} className={voiceGender === gender ? "selected" : ""} aria-pressed={voiceGender === gender} onClick={() => { setVoiceGender(gender); setVoicePersona(voicePersonas[gender][0].name); setAvatarChoice(1); }}>{gender} voice + avatar</button>)}</div></div>
+                    <div className="config-subgroup"><span>Voice persona</span><div className="persona-grid">{voicePersonas[voiceGender].map((persona) => <button type="button" key={persona.name} className={voicePersona === persona.name ? "selected" : ""} aria-pressed={voicePersona === persona.name} onClick={() => setVoicePersona(persona.name)}><strong>{persona.name}</strong><small>{persona.tone}</small></button>)}</div></div>
                     <div className="config-subgroup avatar-picker"><span>Choose a face</span><div>{avatarOptions[voiceGender].map((avatar, index) => <button type="button" key={avatar.src} className={avatarChoice === index + 1 ? "selected" : ""} onClick={() => setAvatarChoice(index + 1)} aria-label={avatar.label} aria-pressed={avatarChoice === index + 1}><img src={avatar.src} alt="" loading="lazy" /><i>✓</i></button>)}</div></div>
                     <div className="config-grid identity-grid">
                       <label><span>Agent name</span><input value={agentName} onChange={(event) => setAgentName(event.target.value)} placeholder="Sara from Acme" /></label>
@@ -755,7 +764,7 @@ export default function Home() {
                     <label className="full-field"><span>Opening line</span><textarea value={openingLine} onChange={(event) => setOpeningLine(event.target.value)} rows={2} /></label>
                   </section>
 
-                  <footer className="control-actions"><span>{languages.length} languages · {knowledgeFiles.length} files · {optionalFeatures.length} optional features</span><button type="submit">Save &amp; view logic →</button></footer>
+                  <footer className="control-actions"><span>{languages.length} languages · {knowledgeFiles.length} files · {optionalFeatures.length} optional features</span><button type="submit">Save agent &amp; return to logic →</button></footer>
                 </form>
               )}
             </section>
@@ -770,7 +779,7 @@ export default function Home() {
                 </select>
               </div>
               <div className="voice-orb" aria-hidden="true"><span><i /><i /><i /><i /><i /><i /><i /><i /><i /></span></div>
-              <div className="connected"><span>✓</span>{calling ? "Listening now" : "Connected"}</div>
+              <div className="connected"><span>✓</span>{listening ? "Listening" : chatBusy ? "Agent is thinking" : calling ? "Test active" : "Ready to test"}</div>
 
               {calling ? (
                 <div className="live-transcript" aria-live="polite">
@@ -779,16 +788,17 @@ export default function Home() {
                   {chatBusy && <p className="assistant is-thinking"><strong>{agentName}</strong>Thinking…</p>}
                   {chatError && <p className="chat-error"><strong>Connection</strong>{chatError}</p>}
                 </div>
-              ) : <div className="test-prompt"><strong>Challenge the generated logic.</strong><span>Ask something unexpected, interrupt, or request a person.</span></div>}
+              ) : <div className="test-prompt"><strong>Test your edited agent here.</strong><span>Start a live test, or choose a ready-made scenario below.</span></div>}
 
+              <span className="scenario-label">Quick scenarios</span>
               <div className="scenario-buttons studio-scenarios" aria-label="Test scenarios">
                 <button type="button" disabled={chatBusy} aria-pressed={scenario === "pricing"} onClick={() => runScenario("pricing")}>Pricing</button>
                 <button type="button" disabled={chatBusy} aria-pressed={scenario === "human"} onClick={() => runScenario("human")}>Human</button>
                 <button type="button" disabled={chatBusy} aria-pressed={scenario === "arabic"} onClick={() => runScenario("arabic")}>Arabic</button>
               </div>
-              {calling && <form className="live-chat-form" onSubmit={submitChat}><label className="sr-only" htmlFor="live-message">Talk to the agent</label><input id="live-message" value={chatInput} onChange={(event) => setChatInput(event.target.value)} placeholder="Type what you would say…" /><button type="submit" disabled={chatBusy || !chatInput.trim()}>Send</button></form>}
-              <div className="call-controls"><button className={`mic-toggle ${listening ? "listening" : ""}`} type="button" onClick={toggleListening} disabled={!calling || !micSupported} aria-label={listening ? "Stop microphone" : "Use microphone"}>🎙</button><button className="main-call" type="button" onClick={calling ? endCall : startCall} aria-label={calling ? "End test call" : "Start test call"}>{calling ? "■" : "●"}</button><button className="end-call" type="button" onClick={endCall} disabled={!calling} aria-label="End call">⌁</button></div>
-              <div className="mic-status">{!micSupported ? "Microphone recognition unavailable · type below" : listening ? "Listening — speak now" : calling ? "Tap the microphone to speak" : "Start the test call first"}</div>
+              {calling && <form className="live-chat-form" onSubmit={submitChat}><label className="sr-only" htmlFor="live-message">Talk to the agent</label><input id="live-message" value={chatInput} onChange={(event) => setChatInput(event.target.value)} placeholder="Type what you would say…" /><button type="submit" disabled={chatBusy || !chatInput.trim()}>{chatBusy ? "Waiting…" : "Send"}</button></form>}
+              <div className="call-controls">{!calling ? <button className="start-test" type="button" onClick={startCall}>▶ Start live test</button> : <><button className={`mic-toggle ${listening ? "listening" : ""}`} type="button" onClick={toggleListening} disabled={!micSupported} aria-label={listening ? "Stop listening" : "Speak with microphone"}>{listening ? "■ Stop listening" : "🎙 Speak"}</button><button className="end-call" type="button" onClick={endCall}>End test</button></>}</div>
+              <div className="mic-status">{!micSupported ? "Microphone unavailable in this browser — typed chat still works." : listening ? "Listening — speak now" : calling ? "Use Speak or type a message above." : "No microphone permission is requested until you tap Speak."}</div>
               <div className="test-foot"><span>{updates.length} edits in this session</span><button type="button" onClick={() => setShowLaunch(true)}>Approve agent →</button></div>
             </aside>
           </section>
@@ -806,6 +816,7 @@ export default function Home() {
           </section>
         </div>
       )}
+      {notice && <div className={`studio-notice ${notice.kind}`} role="status" aria-live="polite"><span>{notice.kind === "success" ? "✓" : notice.kind === "error" ? "!" : "i"}</span>{notice.message}</div>}
     </main>
   );
 }
