@@ -568,6 +568,7 @@ export default function Home() {
         {stage === "studio" ? (
           <div className="top-actions">
             <button className="new-agent" type="button" onClick={startOver}>New agent</button>
+            <button className="edit-agent-top" type="button" onClick={() => setStudioView("configure")}>✦ Edit agent</button>
             <button className="launch-top" type="button" onClick={() => setShowLaunch(true)}>Connect &amp; go live</button>
           </div>
         ) : <span className="prototype-badge">2027 concept</span>}
@@ -591,7 +592,6 @@ export default function Home() {
                   onChange={(event) => setBrief(event.target.value)}
                   placeholder="spsoft.com — qualify inbound leads and book a discovery call"
                   rows={3}
-                  autoFocus
                 />
                 <button type="submit" disabled={!brief.trim()} aria-label="Create my agent">
                   <span>Create my agent</span><b aria-hidden="true">↗</b>
@@ -639,13 +639,9 @@ export default function Home() {
         <>
           <section className="flow-studio" id="top">
             <aside className="tool-rail" aria-label="Agent studio navigation">
-              <button className={`rail-primary ${studioView === "configure" ? "active" : ""}`} type="button" aria-label="Open agent Control Center" title="Control Center" onClick={() => setStudioView("configure")}>✦</button>
-              <button className={studioView === "logic" ? "active" : ""} type="button" aria-label="Conversation logic" title="Conversation logic" onClick={() => setStudioView("logic")}>⌘</button>
-              <button type="button" aria-label="Edit knowledge" title="Knowledge" onClick={() => setStudioView("configure")}>▤</button>
-              <button type="button" aria-label="Edit agent type" title="Agent type" onClick={() => setStudioView("configure")}>◉</button>
-              <button type="button" aria-label="Edit conversation flows" title="Conversation flows" onClick={() => setStudioView("configure")}>⌯</button>
-              <span />
-              <button type="button" aria-label="Edit voice and settings" title="Voice and settings" onClick={() => setStudioView("configure")}>⚙</button>
+              <button className={`rail-primary ${studioView === "configure" ? "active" : ""}`} type="button" aria-label="Edit agent" onClick={() => setStudioView("configure")}><i>✦</i><small>Edit agent</small></button>
+              <button className={studioView === "logic" ? "active" : ""} type="button" aria-label="Conversation logic" onClick={() => setStudioView("logic")}><i>⌘</i><small>Logic</small></button>
+              <span className="rail-spacer" />
             </aside>
 
             <section className={`logic-canvas ${studioView === "configure" ? "config-mode" : ""}`} aria-label={studioView === "logic" ? "Editable conversation logic" : "Complete agent configuration"}>
@@ -655,6 +651,7 @@ export default function Home() {
               </header>
 
               {studioView === "logic" ? <>
+              <div className="edit-guidance" role="note"><span>✦</span><div><strong>This agent is fully editable.</strong><small>Click any block below to change its behavior, or open <b>Edit agent</b> for knowledge, channels, flows, languages, voice and persona.</small></div><button type="button" onClick={() => setStudioView("configure")}>Edit full agent →</button></div>
               <div className="flow-map">
                 <div className="flow-column top-flow">
                   {logicNodes.filter((node) => node.id === "trigger").map((node) => <button key={node.id} type="button" className={`logic-node ${selectedNodeId === node.id ? "selected" : ""}`} onClick={() => selectNode(node.id)}><i>{node.icon}</i><span><strong>{node.title}</strong><small>{node.description}</small></span><b>●</b></button>)}
@@ -772,7 +769,7 @@ export default function Home() {
                 <button type="button" disabled={chatBusy} aria-pressed={scenario === "arabic"} onClick={() => runScenario("arabic")}>Arabic</button>
               </div>
               {calling && <form className="live-chat-form" onSubmit={submitChat}><label className="sr-only" htmlFor="live-message">Talk to the agent</label><input id="live-message" value={chatInput} onChange={(event) => setChatInput(event.target.value)} placeholder="Type what you would say…" /><button type="submit" disabled={chatBusy || !chatInput.trim()}>Send</button></form>}
-              <div className="call-controls"><button className={`mic-toggle ${listening ? "listening" : ""}`} type="button" onClick={toggleListening} disabled={!calling || !micSupported} aria-label={listening ? "Stop microphone" : "Use microphone"}>🎙</button><button type="button" aria-label="Keypad">⠿</button><button className="main-call" type="button" onClick={calling ? endCall : startCall} aria-label={calling ? "End test call" : "Start test call"}>{calling ? "■" : "●"}</button><button className="end-call" type="button" onClick={endCall} aria-label="End call">⌁</button></div>
+              <div className="call-controls"><button className={`mic-toggle ${listening ? "listening" : ""}`} type="button" onClick={toggleListening} disabled={!calling || !micSupported} aria-label={listening ? "Stop microphone" : "Use microphone"}>🎙</button><button className="main-call" type="button" onClick={calling ? endCall : startCall} aria-label={calling ? "End test call" : "Start test call"}>{calling ? "■" : "●"}</button><button className="end-call" type="button" onClick={endCall} disabled={!calling} aria-label="End call">⌁</button></div>
               <div className="mic-status">{!micSupported ? "Microphone recognition unavailable · type below" : listening ? "Listening — speak now" : calling ? "Tap the microphone to speak" : "Start the test call first"}</div>
               <div className="test-foot"><span>{updates.length} edits in this session</span><button type="button" onClick={() => setShowLaunch(true)}>Approve agent →</button></div>
             </aside>
@@ -782,12 +779,12 @@ export default function Home() {
       )}
 
       {showLaunch && (
-        <div className="modal-backdrop" role="presentation" onMouseDown={() => setShowLaunch(false)}>
-          <section className="launch-modal" role="dialog" aria-modal="true" aria-labelledby="launch-title" onMouseDown={(event) => event.stopPropagation()}>
+        <div className="modal-backdrop">
+          <section className="launch-modal" role="dialog" aria-modal="true" aria-labelledby="launch-title">
             <button className="modal-close" type="button" aria-label="Close deployment dialog" onClick={() => setShowLaunch(false)}>×</button><span className="modal-kicker">Just-in-time setup</span>
             <h2 id="launch-title">The prototype is approved. Now connect only what it needs.</h2><p>No credentials were requested before you experienced the product.</p>
-            <div className="connection-list"><button type="button"><span>01</span><div><strong>Phone line</strong><small>Receive and transfer calls</small></div><b>Connect →</b></button><button type="button"><span>02</span><div><strong>Calendar</strong><small>Offer and book available slots</small></div><b>Connect →</b></button><button type="button"><span>03</span><div><strong>CRM</strong><small>Save context and outcomes</small></div><b>Optional</b></button></div>
-            <button className="approve-launch" type="button" onClick={() => setShowLaunch(false)}>Approve staged launch</button><small className="modal-footnote">Prototype only — no external systems will be connected.</small>
+            <div className="connection-list"><div><span>01</span><div><strong>Phone line</strong><small>Receive and transfer calls</small></div><b>Configured at launch</b></div><div><span>02</span><div><strong>Calendar</strong><small>Offer and book available slots</small></div><b>Configured at launch</b></div><div><span>03</span><div><strong>CRM</strong><small>Save context and outcomes</small></div><b>Optional</b></div></div>
+            <button className="approve-launch" type="button" onClick={() => setShowLaunch(false)}>Close preview</button><small className="modal-footnote">Prototype only — no external systems will be connected.</small>
           </section>
         </div>
       )}
