@@ -627,7 +627,11 @@ export default function Home() {
   async function sendAgentMessage(message: string) {
     const clean = message.trim();
     if (!clean || chatBusy) return;
-    const history = liveMessages;
+    const history = liveMessages[0]?.role === "assistant" ? liveMessages.slice(1) : [...liveMessages];
+    // The opening line is UI state rather than a customer turn. Also drop an
+    // unanswered user message after a failed request so provider history keeps
+    // a valid user/assistant sequence on retry.
+    if (history.at(-1)?.role === "user") history.pop();
     const nextUserMessage: LiveMessage = { role: "user", content: clean };
     setLiveMessages((current) => [...current, nextUserMessage]);
     setChatInput("");
