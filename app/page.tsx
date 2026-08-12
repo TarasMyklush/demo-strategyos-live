@@ -93,6 +93,25 @@ const voicePersonas: Record<VoiceGender, Array<{ name: string; tone: string }>> 
   ],
 };
 
+const avatarOptions: Record<VoiceGender, Array<{ src: string; label: string }>> = {
+  Female: [
+    { src: "/agents/professional-woman-1.webp", label: "Female avatar 1" },
+    { src: "/agents/professional-woman-2.webp", label: "Female avatar 2" },
+    { src: "/agents/professional-woman-3.webp", label: "Female avatar 3" },
+    { src: "/agents/professional-woman-4.webp", label: "Female avatar 4" },
+    { src: "/agents/professional-woman-5.webp", label: "Female avatar 5" },
+    { src: "/agents/jessica-hero.webp", label: "Female avatar 6" },
+    { src: "/agents/bant-qualifier.webp", label: "Female avatar 7" },
+    { src: "/agents/claims-manager.webp", label: "Female avatar 8" },
+  ],
+  Male: [
+    { src: "/agents/professional-man-1.webp", label: "Male avatar 1" },
+    { src: "/agents/professional-man-2.webp", label: "Male avatar 2" },
+    { src: "/agents/customer-support.webp", label: "Male avatar 3" },
+    { src: "/agents/table-of-benefits.webp", label: "Male avatar 4" },
+  ],
+};
+
 function subtypesFor(channel: AgentChannel) {
   if (channel === "Outbound phone") return ["Lead qualification", "Outbound sales"];
   if (channel === "Combination") return ["Multichannel orchestration"];
@@ -257,6 +276,8 @@ export default function Home() {
     : agentSubtype === "Receptionist + sales"
       ? ["Email orders to your inbox"]
       : [];
+
+  const selectedAvatar = avatarOptions[voiceGender][avatarChoice - 1] || avatarOptions[voiceGender][0];
 
   async function createAgent(event: FormEvent) {
     event.preventDefault();
@@ -726,13 +747,10 @@ export default function Home() {
                     <header><span>05</span><div><strong>Voice &amp; persona</strong><small>Languages, gender, named voice, avatar and greeting</small></div></header>
                     <div className="config-subgroup"><span>Languages</span><div className="language-grid">{languageOptions.map((language) => <button type="button" key={language} className={languages.includes(language) ? "selected" : ""} aria-pressed={languages.includes(language)} onClick={() => toggleLanguage(language)}>{language}</button>)}</div></div>
                     <div className="config-subgroup"><span>Gender</span><div className="choice-row">{(["Female", "Male"] as VoiceGender[]).map((gender) => <button type="button" key={gender} className={voiceGender === gender ? "selected" : ""} onClick={() => { setVoiceGender(gender); setVoicePersona(voicePersonas[gender][0].name); setAvatarChoice(1); }}>{gender} voice + avatar</button>)}</div></div>
-                    <div className="persona-grid">{voicePersonas[voiceGender].map((persona) => <button type="button" key={persona.name} className={voicePersona === persona.name ? "selected" : ""} onClick={() => setVoicePersona(persona.name)}><strong>{persona.name}</strong><small>{persona.tone}</small></button>)}</div>
-                    <div className="persona-row">
-                      <div className="avatar-picker"><span>Avatar</span><div>{Array.from({ length: voiceGender === "Female" ? 8 : 4 }, (_, index) => <button type="button" key={index} className={avatarChoice === index + 1 ? "selected" : ""} onClick={() => setAvatarChoice(index + 1)} aria-label={`Avatar ${index + 1}`}><b>{voicePersona.slice(0, 1)}</b></button>)}</div></div>
-                      <div className="config-grid two compact">
-                        <label><span>Agent name</span><input value={agentName} onChange={(event) => setAgentName(event.target.value)} placeholder="Sara from Acme" /></label>
-                        <label><span>Browser voice</span><select value={selectedVoiceURI} onChange={(event) => chooseVoice(event.target.value)} disabled={availableVoices.length === 0}>{availableVoices.length === 0 ? <option>Browser default</option> : availableVoices.map((voice) => <option key={voice.voiceURI} value={voice.voiceURI}>{voice.name} · {voice.lang}</option>)}</select></label>
-                      </div>
+                    <div className="config-subgroup"><span>Voice persona</span><div className="persona-grid">{voicePersonas[voiceGender].map((persona) => <button type="button" key={persona.name} className={voicePersona === persona.name ? "selected" : ""} onClick={() => setVoicePersona(persona.name)}><strong>{persona.name}</strong><small>{persona.tone}</small></button>)}</div></div>
+                    <div className="config-subgroup avatar-picker"><span>Choose a face</span><div>{avatarOptions[voiceGender].map((avatar, index) => <button type="button" key={avatar.src} className={avatarChoice === index + 1 ? "selected" : ""} onClick={() => setAvatarChoice(index + 1)} aria-label={avatar.label} aria-pressed={avatarChoice === index + 1}><img src={avatar.src} alt="" loading="lazy" /><i>✓</i></button>)}</div></div>
+                    <div className="config-grid identity-grid">
+                      <label><span>Agent name</span><input value={agentName} onChange={(event) => setAgentName(event.target.value)} placeholder="Sara from Acme" /></label>
                     </div>
                     <label className="full-field"><span>Opening line</span><textarea value={openingLine} onChange={(event) => setOpeningLine(event.target.value)} rows={2} /></label>
                   </section>
@@ -744,9 +762,9 @@ export default function Home() {
 
             <aside className={`live-test ${calling ? "is-calling" : ""}`} aria-label="Live agent test">
               <header className="live-header"><div><span className="live-pulse">⌁</span><strong>Live test</strong><i /></div><span>{callTime}</span></header>
-              <div className="test-context"><span>{agentName} · {business.name}</span><small>{business.outcome}</small></div>
+              <div className="test-context"><img src={selectedAvatar.src} alt="" /><div><span>{agentName} · {business.name}</span><small>{voicePersona} · {business.outcome}</small></div></div>
               <div className="voice-picker">
-                <label htmlFor="agent-voice">Voice</label>
+                <label htmlFor="agent-voice">Demo playback</label>
                 <select id="agent-voice" value={selectedVoiceURI} onChange={(event) => chooseVoice(event.target.value)} disabled={availableVoices.length === 0}>
                   {availableVoices.length === 0 ? <option>Browser default</option> : availableVoices.map((voice) => <option key={voice.voiceURI} value={voice.voiceURI}>{voice.name} · {voice.lang}</option>)}
                 </select>
