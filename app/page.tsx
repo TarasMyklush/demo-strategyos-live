@@ -2,18 +2,21 @@
 
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
-type Scenario = "opening" | "pricing" | "human" | "arabic";
+type Scenario = string;
 type Stage = "intake" | "building" | "studio";
 type StudioView = "logic" | "configure";
 type AgentChannel = "Inbound phone" | "Outbound phone" | "Website voice + text" | "Combination";
 type VoiceGender = "Female" | "Male";
 type Notice = { kind: "success" | "info" | "error"; message: string };
-type LogicId = "trigger" | "understand" | "retrieve" | "decide" | "respond" | "complete";
+type FlowKind = "entry" | "route" | "fallback";
 
-type LogicNode = {
-  id: LogicId;
+type FlowNode = {
+  id: string;
+  kind: FlowKind;
   title: string;
-  description: string;
+  condition: string;
+  action: string;
+  test_utterance: string;
   icon: string;
 };
 
@@ -24,7 +27,7 @@ type GeneratedAgent = {
   summary: string;
   opening_line: string;
   assumptions: string[];
-  logic: Array<{ id: LogicId; title: string; description: string }>;
+  flow?: Array<Omit<FlowNode, "icon">>;
 };
 
 type RecognitionResultLike = { isFinal: boolean; [index: number]: { transcript: string } };
@@ -67,7 +70,7 @@ const buildSteps = [
 ];
 
 const studioApi = "https://strategyos.live/public/agent-studio";
-const logicIcons: Record<LogicId, string> = { trigger: "ϟ", understand: "◎", retrieve: "⌕", decide: "⌘", respond: "➤", complete: "✓" };
+const flowIcons: Record<FlowKind, string> = { entry: "ϟ", route: "↳", fallback: "⇢" };
 
 const channelOptions: Array<{ name: AgentChannel; detail: string }> = [
   { name: "Inbound phone", detail: "Answer, qualify, book and escalate" },
@@ -119,14 +122,13 @@ function subtypesFor(channel: AgentChannel) {
   return ["Q&A", "Customer support", "Receptionist + sales"];
 }
 
-function makeLogic(business: Business): LogicNode[] {
+function makeFlow(business: Business): FlowNode[] {
   return [
-    { id: "trigger", title: "Trigger", description: "Incoming voice conversation", icon: "ϟ" },
-    { id: "understand", title: "Understand", description: "Extract intent, language and key details", icon: "◎" },
-    { id: "retrieve", title: "Retrieve", description: `Use approved knowledge from ${business.host}`, icon: "⌕" },
-    { id: "decide", title: "Decide", description: "Choose answer, action or human handoff", icon: "⌘" },
-    { id: "respond", title: "Respond", description: `Guide the caller toward: ${business.outcome}`, icon: "➤" },
-    { id: "complete", title: "Complete", description: "Save the outcome and next step", icon: "✓" },
+    { id: "incoming", kind: "entry", title: "Incoming conversation", condition: "", action: "Greet the customer and ask what they want to accomplish.", test_utterance: "Hello, can you help me?", icon: "ϟ" },
+    { id: "business-question", kind: "route", title: "Business question", condition: `Customer asks about ${business.name}`, action: `Answer only from approved knowledge at ${business.host}.`, test_utterance: "What can your company help me with?", icon: "↳" },
+    { id: "desired-outcome", kind: "route", title: "Ready for the next step", condition: `Customer shows intent to ${business.outcome}`, action: "Qualify the request and move it to the agreed next step.", test_utterance: "I am interested. What is the next step?", icon: "↳" },
+    { id: "existing-customer", kind: "route", title: "Existing customer", condition: "Customer needs help with an existing relationship", action: "Collect the essential context and route it to the right owner.", test_utterance: "I am already a customer and need help.", icon: "↳" },
+    { id: "safe-handoff", kind: "fallback", title: "Uncertain or sensitive request", condition: "No route safely matches, facts are missing, or a person is requested", action: "Explain the limit, capture context, and offer a human handoff.", test_utterance: "I need to speak with a person about something unusual.", icon: "⇢" },
   ];
 }
 
@@ -167,9 +169,14 @@ export default function Home() {
   const [seconds, setSeconds] = useState(0);
   const [scenario, setScenario] = useState<Scenario>("opening");
   const [updates, setUpdates] = useState<string[]>([]);
-  const [logicNodes, setLogicNodes] = useState<LogicNode[]>(() => makeLogic(parseBusiness("nextlevel.ai — qualify inbound leads and book a consultation")));
-  const [selectedNodeId, setSelectedNodeId] = useState<LogicId>("understand");
-  const [nodeDraft, setNodeDraft] = useState("Extract intent, language and key details");
+  const [flowNodes, setFlowNodes] = useState<FlowNode[]>(() => makeFlow(parseBusiness("nextlevel.ai — qualify inbound leads and book a consultation")));
+  const [selectedNodeId, setSelectedNodeId] = useState("business-question");
+  const [nodeTitleDraft, setNodeTitleDraft] = useState("Business question");
+  const [nodeConditionDraft, setNodeConditionDraft] = useState("Customer asks about the business");
+  const [nodeActionDraft, setNodeActionDraft] = useState("Answer only from approved knowledge.");
+  const [nodeTestDraft, setNodeTestDraft] = useState("What can your company help me with?");
+  const [activeNodeId, setActiveNodeId] = useState("");
+  const [activeDecision, setActiveDecision] = useState("");
   const [agentName, setAgentName] = useState("Sara");
   const [agentSummary, setAgentSummary] = useState("");
   const [openingLine, setOpeningLine] = useState("Hello, how can I help today?");
@@ -186,6 +193,7 @@ export default function Home() {
   const [interimTranscript, setInterimTranscript] = useState("");
   const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
   const callingRef = useRef(false);
+  const customRouteCounterRef = useRef(1);
   const noticeTimerRef = useRef<number | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [showLaunch, setShowLaunch] = useState(false);
@@ -281,8 +289,15 @@ export default function Home() {
       : [];
 
   const selectedAvatar = avatarOptions[voiceGender][avatarChoice - 1] || avatarOptions[voiceGender][0];
-  const selectedNode = logicNodes.find((node) => node.id === selectedNodeId);
-  const nodeHasChanges = Boolean(nodeDraft.trim()) && nodeDraft.trim() !== selectedNode?.description;
+  const selectedNode = flowNodes.find((node) => node.id === selectedNodeId);
+  const activeNode = flowNodes.find((node) => node.id === activeNodeId);
+  const routeNodes = flowNodes.filter((node) => node.kind === "route");
+  const nodeHasChanges = Boolean(nodeTitleDraft.trim() && nodeActionDraft.trim()) && Boolean(selectedNode) && (
+    nodeTitleDraft.trim() !== selectedNode.title
+    || nodeConditionDraft.trim() !== selectedNode.condition
+    || nodeActionDraft.trim() !== selectedNode.action
+    || nodeTestDraft.trim() !== selectedNode.test_utterance
+  );
 
   function showNotice(message: string, kind: Notice["kind"] = "success") {
     if (noticeTimerRef.current) window.clearTimeout(noticeTimerRef.current);
@@ -315,10 +330,16 @@ export default function Home() {
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.detail || "The agent could not be generated.");
       const generated = payload as GeneratedAgent;
-      const nextLogic = generated.logic.map((node) => ({ ...node, icon: logicIcons[node.id] || "✦" }));
-      setLogicNodes(nextLogic);
-      setSelectedNodeId("understand");
-      setNodeDraft(nextLogic.find((node) => node.id === "understand")?.description || "");
+      const nextFlow = generated.flow?.length
+        ? generated.flow.map((node) => ({ ...node, icon: flowIcons[node.kind] || "✦" }))
+        : makeFlow(nextBusiness);
+      const firstRoute = nextFlow.find((node) => node.kind === "route") || nextFlow[0];
+      setFlowNodes(nextFlow);
+      setSelectedNodeId(firstRoute.id);
+      setNodeTitleDraft(firstRoute.title);
+      setNodeConditionDraft(firstRoute.condition);
+      setNodeActionDraft(firstRoute.action);
+      setNodeTestDraft(firstRoute.test_utterance);
       setAgentName(generated.agent_name || "Sara");
       setAgentSummary(generated.summary || `Designed to ${nextBusiness.outcome}`);
       setOpeningLine(generated.opening_line || "Hello, how can I help today?");
@@ -330,6 +351,8 @@ export default function Home() {
       setKnowledgeFiles([]);
       setStudioView("logic");
       setLiveMessages([]);
+      setActiveNodeId("");
+      setActiveDecision("");
       setStage("studio");
     } catch (error) {
       setGenerationError(error instanceof Error ? error.message : "The agent could not be generated.");
@@ -346,6 +369,8 @@ export default function Home() {
     setUpdates([]);
     setGenerationError("");
     setLiveMessages([]);
+    setActiveNodeId("");
+    setActiveDecision("");
     setShowLaunch(false);
     setStudioView("logic");
   }
@@ -356,6 +381,8 @@ export default function Home() {
     setSeconds(0);
     setScenario("opening");
     setLiveMessages([{ role: "assistant", content: openingLine }]);
+    setActiveNodeId(flowNodes.find((node) => node.kind === "entry")?.id || "");
+    setActiveDecision("Conversation opened; waiting for customer intent.");
     speak(openingLine);
     showNotice("Live test started. Type a message or tap Speak.", "info");
   }
@@ -364,6 +391,8 @@ export default function Home() {
     callingRef.current = false;
     setCalling(false);
     setSeconds(0);
+    setActiveNodeId("");
+    setActiveDecision("");
     stopListening();
     window.speechSynthesis?.cancel();
     showNotice("Live test ended.", "info");
@@ -471,20 +500,77 @@ export default function Home() {
     showNotice(`Playback voice changed to ${voice?.name || "browser default"}.`, "info");
   }
 
-  function selectNode(id: LogicId) {
-    const node = logicNodes.find((item) => item.id === id);
+  function selectNode(id: string) {
+    const node = flowNodes.find((item) => item.id === id);
+    if (!node) return;
     setSelectedNodeId(id);
-    setNodeDraft(node?.description || "");
-    showNotice(`${node?.title || "Logic block"} selected. Edit it below.`, "info");
+    setNodeTitleDraft(node.title);
+    setNodeConditionDraft(node.condition);
+    setNodeActionDraft(node.action);
+    setNodeTestDraft(node.test_utterance);
+    showNotice(`${node.title} selected. Edit its rule below.`, "info");
   }
 
   function saveNode(event: FormEvent) {
     event.preventDefault();
-    const change = nodeDraft.trim();
-    if (!change || !nodeHasChanges) return;
-    setLogicNodes((current) => current.map((node) => node.id === selectedNodeId ? { ...node, description: change } : node));
-    setUpdates((current) => [`${logicNodes.find((node) => node.id === selectedNodeId)?.title}: ${change}`, ...current]);
-    showNotice(`${selectedNode?.title || "Logic block"} saved. The live test now uses it.`);
+    if (!nodeHasChanges) return;
+    const nextNode = {
+      title: nodeTitleDraft.trim(),
+      condition: nodeConditionDraft.trim(),
+      action: nodeActionDraft.trim(),
+      test_utterance: nodeTestDraft.trim() || "Can you help me?",
+    };
+    setFlowNodes((current) => current.map((node) => node.id === selectedNodeId ? { ...node, ...nextNode } : node));
+    setUpdates((current) => [`${nextNode.title}: ${nextNode.action}`, ...current]);
+    showNotice(`${nextNode.title} saved. The live test now routes through this rule.`);
+  }
+
+  function addRoute() {
+    if (routeNodes.length >= 5) {
+      showNotice("Keep this demo focused: a maximum of five primary routes is supported.", "info");
+      return;
+    }
+    const id = `custom-route-${customRouteCounterRef.current}`;
+    customRouteCounterRef.current += 1;
+    const nextNode: FlowNode = {
+      id,
+      kind: "route",
+      title: "New customer route",
+      condition: "Customer expresses this intent",
+      action: "Handle the request and move it to the right next step.",
+      test_utterance: "I need help with this.",
+      icon: flowIcons.route,
+    };
+    setFlowNodes((current) => {
+      const fallbackIndex = current.findIndex((node) => node.kind === "fallback");
+      if (fallbackIndex < 0) return [...current, nextNode];
+      return [...current.slice(0, fallbackIndex), nextNode, ...current.slice(fallbackIndex)];
+    });
+    setSelectedNodeId(id);
+    setNodeTitleDraft(nextNode.title);
+    setNodeConditionDraft(nextNode.condition);
+    setNodeActionDraft(nextNode.action);
+    setNodeTestDraft(nextNode.test_utterance);
+    setUpdates((current) => ["Added a new customer route", ...current]);
+    showNotice("New route added. Define when it matches and what the agent should do.", "info");
+  }
+
+  function removeSelectedRoute() {
+    if (selectedNode?.kind !== "route") return;
+    if (routeNodes.length <= 3) {
+      showNotice("Keep at least three primary customer routes.", "info");
+      return;
+    }
+    const remaining = flowNodes.filter((node) => node.id !== selectedNodeId);
+    const nextSelection = remaining.find((node) => node.kind === "route") || remaining[0];
+    setFlowNodes(remaining);
+    setSelectedNodeId(nextSelection.id);
+    setNodeTitleDraft(nextSelection.title);
+    setNodeConditionDraft(nextSelection.condition);
+    setNodeActionDraft(nextSelection.action);
+    setNodeTestDraft(nextSelection.test_utterance);
+    setUpdates((current) => [`Removed route: ${selectedNode.title}`, ...current]);
+    showNotice(`${selectedNode.title} removed.`);
   }
 
   function chooseChannel(channel: AgentChannel) {
@@ -546,6 +632,8 @@ export default function Home() {
     setLiveMessages((current) => [...current, nextUserMessage]);
     setChatInput("");
     setChatBusy(true);
+    setActiveNodeId(flowNodes.find((node) => node.kind === "entry")?.id || "");
+    setActiveDecision("Classifying intent against the generated business routes.");
     setChatError("");
     try {
       const response = await fetch(`${studioApi}/chat`, {
@@ -554,7 +642,7 @@ export default function Home() {
         body: JSON.stringify({
           business_name: `${companyName || business.name}; agent name: ${agentName}`,
           outcome: configuredContext,
-          logic: logicNodes.map(({ id, title, description }) => ({ id, title, description })),
+          flow: flowNodes.map((node) => ({ id: node.id, kind: node.kind, title: node.title, condition: node.condition, action: node.action, test_utterance: node.test_utterance })),
           messages: history,
           user_message: clean,
         }),
@@ -563,6 +651,8 @@ export default function Home() {
       if (!response.ok) throw new Error(payload.detail || "The agent did not answer.");
       const reply = String(payload.reply || "I’m sorry, I could not answer that.");
       setLiveMessages((current) => [...current, { role: "assistant", content: reply }]);
+      setActiveNodeId(String(payload.active_node_id || flowNodes.find((node) => node.kind === "fallback")?.id || ""));
+      setActiveDecision(String(payload.decision || "Matched the safest available route."));
       speak(reply);
     } catch (error) {
       setChatError(error instanceof Error ? error.message : "The agent did not answer.");
@@ -577,16 +667,10 @@ export default function Home() {
     void sendAgentMessage(chatInput);
   }
 
-  function runScenario(nextScenario: Scenario) {
-    setScenario(nextScenario);
+  function runScenario(node: FlowNode) {
+    setScenario(node.id);
     if (!calling) startCall();
-    const prompts: Record<Scenario, string> = {
-      opening: "I’m interested, but I’m not sure where to start.",
-      pricing: "What does it cost?",
-      human: "I need to speak to a person.",
-      arabic: "Can we continue in Arabic?",
-    };
-    window.setTimeout(() => void sendAgentMessage(prompts[nextScenario]), calling ? 0 : 80);
+    window.setTimeout(() => void sendAgentMessage(node.test_utterance), calling ? 0 : 80);
   }
 
   return (
@@ -683,33 +767,33 @@ export default function Home() {
             <section className={`logic-canvas ${studioView === "configure" ? "config-mode" : ""}`} aria-label={studioView === "logic" ? "Editable conversation logic" : "Complete agent configuration"}>
               <header className="canvas-header">
                 <div><span className="canvas-kicker">Generated from {business.host} · {agentName}</span><h1>{studioView === "logic" ? "Your Voice AI Agent" : "Agent Control Center"}</h1><p className="agent-summary">{studioView === "logic" ? agentSummary : "Every wizard control, editable here without leaving the studio."}</p></div>
-                {studioView === "logic" ? <div className="canvas-status"><span>v1</span><strong>All logic visible</strong><small>{assumptions.length} assumptions · click any block to edit</small></div> : <button className="back-to-logic" type="button" onClick={() => setStudioView("logic")}>View logic →</button>}
+                {studioView === "logic" ? <div className="canvas-status"><span>LIVE</span><strong>{routeNodes.length} generated routes</strong><small>{assumptions.length} assumptions · every rule is editable</small></div> : <button className="back-to-logic" type="button" onClick={() => setStudioView("logic")}>View logic →</button>}
               </header>
 
               {studioView === "logic" ? <>
-              <div className="edit-guidance" role="note"><span>✦</span><div><strong>How to use this studio</strong><small><b>1</b> Select a block · <b>2</b> Edit its sentence below · <b>3</b> Save changes · <b>4</b> Start a live test</small></div><button type="button" onClick={() => setStudioView("configure")}>Edit full agent →</button></div>
-              <div className="flow-map">
-                <div className="flow-column top-flow">
-                  {logicNodes.filter((node) => node.id === "trigger").map((node) => <button key={node.id} type="button" className={`logic-node ${selectedNodeId === node.id ? "selected" : ""}`} onClick={() => selectNode(node.id)}><i>{node.icon}</i><span><strong>{node.title}</strong><small>{node.description}</small></span><b>●</b></button>)}
-                  <span className="flow-connector vertical" />
-                  {logicNodes.filter((node) => node.id === "understand").map((node) => <button key={node.id} type="button" className={`logic-node wide ${selectedNodeId === node.id ? "selected" : ""}`} onClick={() => selectNode(node.id)}><i>{node.icon}</i><span><strong>{node.title}</strong><small>{node.description}</small></span><b>✓</b></button>)}
+              <div className="edit-guidance" role="note"><span>✦</span><div><strong>This is the business logic—not generic AI plumbing.</strong><small><b>1</b> Select a route · <b>2</b> Edit when it matches · <b>3</b> Edit what happens · <b>4</b> Test that route</small></div><button type="button" onClick={() => setStudioView("configure")}>Edit full agent →</button></div>
+              <div className="flow-map business-flow">
+                <div className="entry-row">
+                  {flowNodes.filter((node) => node.kind === "entry").map((node) => <button key={node.id} type="button" aria-pressed={selectedNodeId === node.id} className={`logic-node flow-entry ${selectedNodeId === node.id ? "selected" : ""} ${activeNodeId === node.id ? "executing" : ""}`} onClick={() => selectNode(node.id)}><i>{node.icon}</i><span><em>ENTRY</em><strong>{node.title}</strong><small>{node.action}</small></span><b>{activeNodeId === node.id ? "LIVE" : "●"}</b></button>)}
                 </div>
-
-                <div className="branch-connector" aria-hidden="true"><span /><i /><b /></div>
-                <div className="branch-row">
-                  {logicNodes.filter((node) => ["retrieve", "decide", "respond"].includes(node.id)).map((node) => <button key={node.id} type="button" className={`logic-node branch ${selectedNodeId === node.id ? "selected" : ""}`} onClick={() => selectNode(node.id)}><i>{node.icon}</i><span><strong>{node.title}</strong><small>{node.description}</small></span><b>✓</b></button>)}
+                <div className="route-divider"><span>Route by customer intent</span></div>
+                <div className="business-route-grid">
+                  {routeNodes.map((node) => <button key={node.id} type="button" aria-pressed={selectedNodeId === node.id} className={`logic-node business-route ${selectedNodeId === node.id ? "selected" : ""} ${activeNodeId === node.id ? "executing" : ""}`} onClick={() => selectNode(node.id)}><i>{node.icon}</i><span><em>WHEN</em><strong>{node.title}</strong><small>{node.condition}</small><em>DO</em><small>{node.action}</small></span><b>{activeNodeId === node.id ? "LIVE" : "✓"}</b></button>)}
                 </div>
-                <div className="merge-connector" aria-hidden="true"><span /><i /></div>
-                <div className="complete-row">
-                  {logicNodes.filter((node) => node.id === "complete").map((node) => <button key={node.id} type="button" className={`logic-node ${selectedNodeId === node.id ? "selected" : ""}`} onClick={() => selectNode(node.id)}><i>{node.icon}</i><span><strong>{node.title}</strong><small>{node.description}</small></span><b>✓</b></button>)}
+                <div className="fallback-row">
+                  {flowNodes.filter((node) => node.kind === "fallback").map((node) => <button key={node.id} type="button" aria-pressed={selectedNodeId === node.id} className={`logic-node flow-fallback ${selectedNodeId === node.id ? "selected" : ""} ${activeNodeId === node.id ? "executing" : ""}`} onClick={() => selectNode(node.id)}><i>{node.icon}</i><span><em>SAFE EXIT</em><strong>{node.title}</strong><small>{node.condition} → {node.action}</small></span><b>{activeNodeId === node.id ? "LIVE" : "✓"}</b></button>)}
                 </div>
               </div>
 
-              <form className="node-editor" onSubmit={saveNode}>
-                <div className="editor-title"><span>Selected block</span><strong>{selectedNode?.title}</strong><small>Edit the text →</small></div>
-                <label htmlFor="node-logic" className="sr-only">Behavior for selected logic block</label>
-                <input id="node-logic" value={nodeDraft} onChange={(event) => setNodeDraft(event.target.value)} />
-                <button type="submit" disabled={!nodeHasChanges}>{nodeHasChanges ? "Save changes" : "Saved ✓"}</button>
+              <form className="node-editor route-editor" onSubmit={saveNode}>
+                <header><div><span>Editing {selectedNode?.kind === "route" ? "customer route" : selectedNode?.kind}</span><strong>{selectedNode?.title}</strong></div><div className="route-editor-actions"><button className="add-route" type="button" onClick={addRoute}>＋ Add route</button>{selectedNode?.kind === "route" && <button className="remove-route" type="button" onClick={removeSelectedRoute}>Remove</button>}</div></header>
+                <div className="route-editor-grid">
+                  <label><span>Route name</span><input value={nodeTitleDraft} onChange={(event) => setNodeTitleDraft(event.target.value)} /></label>
+                  {selectedNode?.kind !== "entry" && <label><span>When this matches</span><input value={nodeConditionDraft} onChange={(event) => setNodeConditionDraft(event.target.value)} /></label>}
+                  <label className="route-action-field"><span>What the agent does</span><textarea rows={2} value={nodeActionDraft} onChange={(event) => setNodeActionDraft(event.target.value)} /></label>
+                  <label><span>One-click test message</span><input value={nodeTestDraft} onChange={(event) => setNodeTestDraft(event.target.value)} /></label>
+                </div>
+                <footer><small>Changes are used by the next live response.</small><button type="submit" disabled={!nodeHasChanges}>{nodeHasChanges ? "Save route" : "Saved ✓"}</button></footer>
               </form>
               </> : (
                 <form className="control-center" onSubmit={saveConfiguration}>
@@ -781,6 +865,8 @@ export default function Home() {
               <div className="voice-orb" aria-hidden="true"><span><i /><i /><i /><i /><i /><i /><i /><i /><i /></span></div>
               <div className="connected"><span>✓</span>{listening ? "Listening" : chatBusy ? "Agent is thinking" : calling ? "Test active" : "Ready to test"}</div>
 
+              {calling && activeNode && <div className={`decision-trace ${chatBusy ? "routing" : ""}`} aria-live="polite"><span>{chatBusy ? "Routing intent…" : activeNode.kind === "entry" ? "Current step" : "Matched route"}</span><strong>{chatBusy ? "Finding the safest path" : activeNode.title}</strong><small>{activeDecision || activeNode.action}</small></div>}
+
               {calling ? (
                 <div className="live-transcript" aria-live="polite">
                   {liveMessages.map((line, index) => <p className={line.role} key={`${line.content}-${index}`}><strong>{line.role === "assistant" ? agentName : "You"}</strong>{line.content}</p>)}
@@ -790,11 +876,9 @@ export default function Home() {
                 </div>
               ) : <div className="test-prompt"><strong>Test your edited agent here.</strong><span>Start a live test, or choose a ready-made scenario below.</span></div>}
 
-              <span className="scenario-label">Quick scenarios</span>
+              <span className="scenario-label">Test a generated route</span>
               <div className="scenario-buttons studio-scenarios" aria-label="Test scenarios">
-                <button type="button" disabled={chatBusy} aria-pressed={scenario === "pricing"} onClick={() => runScenario("pricing")}>Pricing</button>
-                <button type="button" disabled={chatBusy} aria-pressed={scenario === "human"} onClick={() => runScenario("human")}>Human</button>
-                <button type="button" disabled={chatBusy} aria-pressed={scenario === "arabic"} onClick={() => runScenario("arabic")}>Arabic</button>
+                {flowNodes.filter((node) => node.kind !== "entry").map((node) => <button key={node.id} type="button" disabled={chatBusy} aria-pressed={scenario === node.id} onClick={() => runScenario(node)}>{node.title}</button>)}
               </div>
               {calling && <form className="live-chat-form" onSubmit={submitChat}><label className="sr-only" htmlFor="live-message">Talk to the agent</label><input id="live-message" value={chatInput} onChange={(event) => setChatInput(event.target.value)} placeholder="Type what you would say…" /><button type="submit" disabled={chatBusy || !chatInput.trim()}>{chatBusy ? "Waiting…" : "Send"}</button></form>}
               <div className="call-controls">{!calling ? <button className="start-test" type="button" onClick={startCall}>▶ Start live test</button> : <><button className={`mic-toggle ${listening ? "listening" : ""}`} type="button" onClick={toggleListening} disabled={!micSupported} aria-label={listening ? "Stop listening" : "Speak with microphone"}>{listening ? "■ Stop listening" : "🎙 Speak"}</button><button className="end-call" type="button" onClick={endCall}>End test</button></>}</div>
