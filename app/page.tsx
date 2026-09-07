@@ -809,7 +809,7 @@ export default function Home() {
               </form>
               </> : (
                 <form className="control-center" onSubmit={saveConfiguration}>
-                  <div className="control-intro"><span>One workspace · zero steps</span><strong>Change anything. Test the result immediately.</strong><small>These settings are included in every live DeepSeek conversation.</small></div>
+                  <div className="control-intro"><span>One workspace · zero steps</span><strong>Change anything. Test the result immediately.</strong><small>These settings are included in every live AI conversation.</small></div>
 
                   <section className="config-section">
                     <header><span>01</span><div><strong>Owner &amp; business</strong><small>Contact details from the original “You” step</small></div></header>
