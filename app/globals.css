@@ -9,6 +9,8 @@
   --accent: #7551ea;
   --accent-dark: #5f38dc;
   --success: #2f9a68;
+  --font-geist-sans: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-geist-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
 }
 
 @theme inline {
