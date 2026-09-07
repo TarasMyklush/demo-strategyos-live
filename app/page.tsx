@@ -69,7 +69,7 @@ const buildSteps = [
   { title: "Opening the test studio", detail: "Your first version is ready to challenge" },
 ];
 
-const studioApi = "https://strategyos.live/public/agent-studio";
+const studioApi = "/api/agent";
 const flowIcons: Record<FlowKind, string> = { entry: "ϟ", route: "↳", fallback: "⇢" };
 
 const channelOptions: Array<{ name: AgentChannel; detail: string }> = [

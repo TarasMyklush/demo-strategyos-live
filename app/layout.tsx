@@ -18,7 +18,7 @@ export async function generateMetadata(): Promise<Metadata> {
   const host =
     headerList.get("x-forwarded-host") ??
     headerList.get("host") ??
-    "demo.strategyos.live";
+    "voiceagent.strategyos.live";
   const protocol = headerList.get("x-forwarded-proto") ?? "https";
   const origin = `${protocol}://${host}`;
 
