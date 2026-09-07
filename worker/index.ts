@@ -260,7 +260,10 @@ interface ExecutionContext {
 
 const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    env = env || ({} as Env);
+    const nodeEnvironment = (globalThis as typeof globalThis & {
+      process?: { env?: Record<string, string | undefined> };
+    }).process?.env;
+    env = { ...(nodeEnvironment || {}), ...(env || {}) } as unknown as Env;
     const url = new URL(request.url);
 
     if (request.method === "POST" && url.pathname === "/api/agent/generate") return generateAgent(request, env);

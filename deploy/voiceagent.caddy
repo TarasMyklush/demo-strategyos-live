@@ -1,0 +1,4 @@
+voiceagent.strategyos.live {
+  encode zstd gzip
+  reverse_proxy voiceagent-app:3000
+}
