@@ -495,13 +495,22 @@ h1 { font-size:clamp(43px,5.1vw,76px); line-height:.98; letter-spacing:-.062em; 
 @media (max-width: 600px) {
   .flow-studio { display:block; }
   .tool-rail { display:none; }
-  .logic-canvas { overflow-x:auto; padding:20px 14px; }
-  .canvas-header,.node-editor,.canvas-command { min-width:620px; }
-  .edit-guidance { min-width:620px; }
-  .flow-map { min-width:620px; }
+  .logic-canvas { overflow-x:hidden; padding:20px 14px; }
+  .canvas-header,.node-editor,.canvas-command,.edit-guidance,.flow-map { min-width:0; }
+  .canvas-header { flex-direction:column; gap:12px; }
+  .canvas-status { width:100%; }
+  .edit-guidance { grid-template-columns:auto 1fr; }
+  .edit-guidance button { grid-column:1 / -1; }
+  .business-route-grid { grid-template-columns:1fr; }
+  .logic-node.flow-entry,.logic-node.flow-fallback { width:100%; }
+  .route-editor-grid { grid-template-columns:1fr; }
+  .route-editor-grid .route-action-field { grid-column:auto; }
+  .route-editor > header { align-items:flex-start; flex-direction:column; }
   .live-test { min-height:620px; padding:22px 18px; }
   .usecase-grid,.config-grid.two,.channel-grid,.persona-grid { grid-template-columns:1fr; }
   .node-editor { grid-template-columns:90px 1fr auto; }
+  .share-link-row { grid-template-columns:1fr; }
+  .share-link-row button { min-height:44px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
