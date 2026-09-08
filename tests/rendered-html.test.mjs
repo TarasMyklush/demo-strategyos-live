@@ -1,91 +1,73 @@
 import assert from "node:assert/strict";
-import { access, readFile, readdir } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 
-const developmentPreviewMeta =
-  /<meta(?=[^>]*\bname=["']codex-preview["'])(?=[^>]*\bcontent=["']development["'])[^>]*>/i;
-const templateRoot = new URL("../", import.meta.url);
-const previewRoot = new URL("../app/_sites-preview/", import.meta.url);
-
-async function render() {
+async function loadWorker() {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
-  workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
-  const { default: worker } = await import(workerUrl.href);
-
-  return worker.fetch(
-    new Request("http://localhost/", {
-      headers: { accept: "text/html" },
-    }),
-    {
-      ASSETS: {
-        fetch: async () => new Response("Not found", { status: 404 }),
-      },
-    },
-    {
-      waitUntil() {},
-      passThroughOnException() {},
-    },
-  );
+  workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}-${Math.random()}`);
+  return (await import(workerUrl.href)).default;
 }
 
-test("server-renders the starter loading skeleton", async () => {
-  const response = await render();
+function environment(overrides = {}) {
+  return {
+    ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) },
+    ...overrides,
+  };
+}
+
+const context = { waitUntil() {}, passThroughOnException() {} };
+
+test("server-renders the outcome-first agent intake", async () => {
+  const worker = await loadWorker();
+  const response = await worker.fetch(new Request("http://localhost/", { headers: { accept: "text/html" } }), environment(), context);
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
-
   const html = await response.text();
-  assert.match(html, developmentPreviewMeta);
-  assert.match(html, /<title>Your site is taking shape<\/title>/i);
-  assert.match(html, /Building your site/);
-  assert.match(html, /Your site is taking shape/);
-  assert.match(
-    html,
-    /Your first version will appear here automatically when it’s ready\./,
-  );
-  assert.doesNotMatch(html, /Codex/);
-  assert.match(html, /react-loading-skeleton/);
-  assert.match(html, /role="status"/);
+  assert.match(html, /Agent Studio 2027/);
+  assert.match(html, /Enter your company website and describe the outcome you want/);
+  assert.match(html, /Create my agent/);
+  assert.doesNotMatch(html, /codex-preview|chatgpt\.site|openai-site/i);
 });
 
-test("keeps the loading skeleton scoped and disposable", async () => {
-  const [preview, css, page, layout, packageJson, files] = await Promise.all([
-    readFile(new URL("SkeletonPreview.tsx", previewRoot), "utf8"),
-    readFile(new URL("preview.css", previewRoot), "utf8"),
-    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../package.json", import.meta.url), "utf8"),
-    readdir(previewRoot),
-  ]);
+test("keeps every legacy configurator parameter available in one studio", async () => {
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  for (const expected of [
+    "Full name", "Work email", "Company", "Website URL", "Company description", "Primary use case", "Primary language",
+    "Answer incoming calls", "Support customers", "Qualify leads", "Follow up and sell", "Help website visitors", "Help me choose", "Other language",
+  ]) assert.match(page, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(page, /Apply changes & update routes/);
+  assert.match(page, /protected manual edits/);
+});
 
-  assert.deepEqual(files.sort(), ["SkeletonPreview.tsx", "preview.css"]);
-  assert.match(preview, /from "react-loading-skeleton"/);
-  assert.match(preview, /baseColor="#eceae7"/);
-  assert.match(preview, /highlightColor="#f9f8f6"/);
-  assert.match(preview, /duration=\{2\.8\}/);
-  assert.match(preview, /sites-skeleton-search-placeholder/);
-  assert.match(packageJson, /"react-loading-skeleton": "3\.5\.0"/);
+test("persists and restores a standalone agent configuration", async () => {
+  const worker = await loadWorker();
+  const dataRoot = await mkdtemp(path.join(os.tmpdir(), "voiceagent-test-"));
+  try {
+    const config = { version: 1, agentName: "Sara", business: { name: "Acme" }, flowNodes: [1, 2, 3, 4, 5] };
+    const saved = await worker.fetch(new Request("http://localhost/api/agent/save", {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ config }),
+    }), environment({ AGENT_DATA_DIR: dataRoot }), context);
+    assert.equal(saved.status, 200);
+    const savedBody = await saved.json();
+    assert.match(savedBody.id, /^[a-z0-9-]{8,}$/);
+    const loaded = await worker.fetch(new Request(`http://localhost/api/agent/load?id=${savedBody.id}`), environment({ AGENT_DATA_DIR: dataRoot }), context);
+    assert.equal(loaded.status, 200);
+    assert.deepEqual((await loaded.json()).config, config);
+  } finally {
+    await rm(dataRoot, { recursive: true, force: true });
+  }
+});
 
-  const shellIndex = preview.indexOf('className="sites-skeleton-shell"');
-  const statusIndex = preview.indexOf('className="sites-skeleton-status"');
-  assert.ok(shellIndex >= 0 && statusIndex > shellIndex);
-  assert.match(css, /position:\s*fixed/);
-  assert.match(css, /inset:\s*0/);
-  assert.match(css, /opacity:\s*0\.52/);
-  assert.match(css, /prefers-reduced-motion:\s*reduce/);
-  assert.doesNotMatch(css, /#020617|canvas|pets|progress/i);
-  assert.doesNotMatch(
-    preview,
-    /loading-spinner|status-mark|status-progress|canvas|cookie|random/i,
-  );
-
-  assert.match(page, /export const metadata:\s*Metadata/);
-  assert.match(page, /"codex-preview": "development"/);
-  assert.match(page, /<SkeletonPreview \/>/);
-  assert.match(layout, /title:\s*"Starter Project"/);
-  assert.doesNotMatch(layout, /codex-preview|_sites-preview|themeColor|\bViewport\b/);
-  assert.doesNotMatch(css, /(^|\s)(html|body)\s*\{/m);
-
-  await assert.rejects(
-    access(new URL("public/_sites-preview", templateRoot)),
-  );
+test("extracts text knowledge instead of storing a decorative filename", async () => {
+  const worker = await loadWorker();
+  const form = new FormData();
+  form.append("file", new Blob(["Pricing starts at 100 dollars. Support is available every weekday."], { type: "text/plain" }), "knowledge.txt");
+  const response = await worker.fetch(new Request("http://localhost/api/agent/knowledge", { method: "POST", body: form }), environment(), context);
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.name, "knowledge.txt");
+  assert.match(body.text, /Pricing starts at 100 dollars/);
+  assert.equal(body.status, "processed");
 });

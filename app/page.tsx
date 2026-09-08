@@ -7,6 +7,7 @@ type Stage = "intake" | "building" | "studio";
 type StudioView = "logic" | "configure";
 type AgentChannel = "Inbound phone" | "Outbound phone" | "Website voice + text" | "Combination";
 type VoiceGender = "Female" | "Male";
+type PrimaryUseCase = "Answer incoming calls" | "Support customers" | "Qualify leads" | "Follow up and sell" | "Help website visitors" | "Help me choose";
 type Notice = { kind: "success" | "info" | "error"; message: string };
 type FlowKind = "entry" | "route" | "fallback";
 
@@ -21,6 +22,7 @@ type FlowNode = {
 };
 
 type LiveMessage = { role: "user" | "assistant"; content: string };
+type KnowledgeDocument = { name: string; text: string; status: string; characters?: number };
 
 type GeneratedAgent = {
   agent_name: string;
@@ -28,6 +30,39 @@ type GeneratedAgent = {
   opening_line: string;
   assumptions: string[];
   flow?: Array<Omit<FlowNode, "icon">>;
+  source?: { url?: string; title?: string; excerpt?: string; read_at?: string };
+};
+
+type AgentConfig = {
+  version: 1;
+  owner: { name: string; email: string; phone: string };
+  business: Business;
+  companyName: string;
+  websiteUrl: string;
+  websiteKnowledge: string;
+  websiteReadAt: string;
+  companyDescription: string;
+  additionalKnowledge: string;
+  knowledgeDocuments: KnowledgeDocument[];
+  primaryUseCase: PrimaryUseCase;
+  agentChannel: AgentChannel;
+  agentSubtype: string;
+  optionalFeatures: string[];
+  customFlows: string;
+  languages: string[];
+  primaryLanguage: string;
+  otherLanguage: string;
+  voiceGender: VoiceGender;
+  voicePersona: string;
+  avatarChoice: number;
+  selectedVoiceURI: string;
+  agentName: string;
+  agentSummary: string;
+  openingLine: string;
+  assumptions: string[];
+  flowNodes: FlowNode[];
+  protectedRouteIds: string[];
+  liveMessages: LiveMessage[];
 };
 
 type RecognitionResultLike = { isFinal: boolean; [index: number]: { transcript: string } };
@@ -79,7 +114,21 @@ const channelOptions: Array<{ name: AgentChannel; detail: string }> = [
   { name: "Combination", detail: "Multiple channels with shared memory" },
 ];
 
-const languageOptions = ["English", "Español", "Français", "Deutsch", "Italiano", "Português", "中文", "日本語", "한국어", "हिन्दी", "العربية (MSA)", "العربية · Gulf", "العربية · Najdi", "Русский", "Türkçe"];
+const primaryUseCaseOptions: Array<{ name: PrimaryUseCase; detail: string }> = [
+  { name: "Answer incoming calls", detail: "Answer questions, capture details and route requests" },
+  { name: "Support customers", detail: "Resolve routine issues and escalate safely" },
+  { name: "Qualify leads", detail: "Discover needs and identify sales-ready conversations" },
+  { name: "Follow up and sell", detail: "Re-engage leads and move opportunities forward" },
+  { name: "Help website visitors", detail: "Guide visitors by voice or text and capture enquiries" },
+  { name: "Help me choose", detail: "Let the AI recommend the best setup from your outcome" },
+];
+
+const languageOptions = ["English", "Español", "Français", "Deutsch", "Italiano", "Português", "中文", "日本語", "한국어", "हिन्दी", "العربية (MSA)", "العربية · Gulf", "العربية · Najdi", "Русский", "Türkçe", "Other"];
+const languageLocales: Record<string, string> = {
+  English: "en-US", Español: "es-ES", Français: "fr-FR", Deutsch: "de-DE", Italiano: "it-IT", Português: "pt-BR",
+  中文: "zh-CN", 日本語: "ja-JP", 한국어: "ko-KR", हिन्दी: "hi-IN", "العربية (MSA)": "ar-SA", "العربية · Gulf": "ar-AE",
+  "العربية · Najdi": "ar-SA", Русский: "ru-RU", Türkçe: "tr-TR",
+};
 const voicePersonas: Record<VoiceGender, Array<{ name: string; tone: string }>> = {
   Female: [
     { name: "Sara", tone: "Warm, professional · Gulf-tuned" },
@@ -119,7 +168,7 @@ const avatarOptions: Record<VoiceGender, Array<{ src: string; label: string }>> 
 function subtypesFor(channel: AgentChannel) {
   if (channel === "Outbound phone") return ["Lead qualification", "Outbound sales"];
   if (channel === "Combination") return ["Multichannel orchestration"];
-  return ["Q&A", "Customer support", "Receptionist + sales"];
+  return ["Q&A", "Customer support", "Receptionist + sales", "Lead qualification"];
 }
 
 function makeFlow(business: Business): FlowNode[] {
@@ -160,6 +209,26 @@ function parseBusiness(brief: string): Business {
   return { brief, host, url, name, outcome };
 }
 
+function configurationFingerprint(input: {
+  websiteUrl: string;
+  outcome: string;
+  primaryUseCase: PrimaryUseCase;
+  agentChannel: AgentChannel;
+  agentSubtype: string;
+  companyDescription: string;
+  additionalKnowledge: string;
+  knowledgeDocuments: KnowledgeDocument[];
+  optionalFeatures: string[];
+  customFlows: string;
+}) {
+  return JSON.stringify({
+    websiteUrl: input.websiteUrl.trim(), outcome: input.outcome.trim(), primaryUseCase: input.primaryUseCase,
+    agentChannel: input.agentChannel, agentSubtype: input.agentSubtype, companyDescription: input.companyDescription.trim(),
+    additionalKnowledge: input.additionalKnowledge.trim(), documents: input.knowledgeDocuments.map((document) => [document.name, document.text.length]),
+    optionalFeatures: input.optionalFeatures, customFlows: input.customFlows.trim(),
+  });
+}
+
 export default function Home() {
   const [stage, setStage] = useState<Stage>("intake");
   const [brief, setBrief] = useState("");
@@ -186,6 +255,7 @@ export default function Home() {
   const [chatInput, setChatInput] = useState("");
   const [chatBusy, setChatBusy] = useState(false);
   const [chatError, setChatError] = useState("");
+  const [handoffQueued, setHandoffQueued] = useState(false);
   const [availableVoices, setAvailableVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [selectedVoiceURI, setSelectedVoiceURI] = useState("");
   const [micSupported, setMicSupported] = useState(false);
@@ -203,17 +273,97 @@ export default function Home() {
   const [ownerPhone, setOwnerPhone] = useState("");
   const [companyName, setCompanyName] = useState("");
   const [websiteUrl, setWebsiteUrl] = useState("");
+  const [websiteKnowledge, setWebsiteKnowledge] = useState("");
+  const [websiteReadAt, setWebsiteReadAt] = useState("");
   const [companyDescription, setCompanyDescription] = useState("");
   const [additionalKnowledge, setAdditionalKnowledge] = useState("");
-  const [knowledgeFiles, setKnowledgeFiles] = useState<string[]>([]);
+  const [knowledgeDocuments, setKnowledgeDocuments] = useState<KnowledgeDocument[]>([]);
+  const [knowledgeBusy, setKnowledgeBusy] = useState(false);
+  const [primaryUseCase, setPrimaryUseCase] = useState<PrimaryUseCase>("Help me choose");
   const [agentChannel, setAgentChannel] = useState<AgentChannel>("Inbound phone");
   const [agentSubtype, setAgentSubtype] = useState("Receptionist + sales");
   const [optionalFeatures, setOptionalFeatures] = useState<string[]>(["Email orders to your inbox"]);
   const [customFlows, setCustomFlows] = useState("");
   const [languages, setLanguages] = useState<string[]>(["English"]);
+  const [primaryLanguage, setPrimaryLanguage] = useState("English");
+  const [otherLanguage, setOtherLanguage] = useState("");
   const [voiceGender, setVoiceGender] = useState<VoiceGender>("Female");
   const [voicePersona, setVoicePersona] = useState("Sara");
   const [avatarChoice, setAvatarChoice] = useState(1);
+  const [protectedRouteIds, setProtectedRouteIds] = useState<string[]>([]);
+  const [agentId, setAgentId] = useState("");
+  const [savedAt, setSavedAt] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [rebuilding, setRebuilding] = useState(false);
+  const [lastStructuralFingerprint, setLastStructuralFingerprint] = useState("");
+
+  useEffect(() => {
+    const requestedId = new URLSearchParams(window.location.search).get("agent");
+    if (!requestedId) return;
+    void fetch(`${studioApi}/load?id=${encodeURIComponent(requestedId)}`)
+      .then(async (response) => {
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.detail || "The saved agent could not be loaded.");
+        const config = payload.config as Partial<AgentConfig>;
+        if (!config.business || !Array.isArray(config.flowNodes) || config.flowNodes.length < 5) throw new Error("The saved agent is incomplete.");
+        const loadedFlow = config.flowNodes.map((node) => ({ ...node, icon: flowIcons[node.kind] || "✦" }));
+        const firstRoute = loadedFlow.find((node) => node.kind === "route") || loadedFlow[0];
+        setBusiness(config.business);
+        setBrief(config.business.brief || `${config.websiteUrl || config.business.url} — ${config.business.outcome}`);
+        setOwnerName(config.owner?.name || "");
+        setOwnerEmail(config.owner?.email || "");
+        setOwnerPhone(config.owner?.phone || "");
+        setCompanyName(config.companyName || config.business.name);
+        setWebsiteUrl(config.websiteUrl || config.business.url);
+        setWebsiteKnowledge(config.websiteKnowledge || "");
+        setWebsiteReadAt(config.websiteReadAt || "");
+        setCompanyDescription(config.companyDescription || "");
+        setAdditionalKnowledge(config.additionalKnowledge || "");
+        setKnowledgeDocuments(config.knowledgeDocuments || []);
+        setPrimaryUseCase(config.primaryUseCase || "Help me choose");
+        setAgentChannel(config.agentChannel || "Inbound phone");
+        setAgentSubtype(config.agentSubtype || "Receptionist + sales");
+        setOptionalFeatures(config.optionalFeatures || []);
+        setCustomFlows(config.customFlows || "");
+        setLanguages(config.languages?.length ? config.languages : ["English"]);
+        setPrimaryLanguage(config.primaryLanguage || config.languages?.[0] || "English");
+        setOtherLanguage(config.otherLanguage || "");
+        setVoiceGender(config.voiceGender || "Female");
+        setVoicePersona(config.voicePersona || "Sara");
+        setAvatarChoice(config.avatarChoice || 1);
+        setSelectedVoiceURI(config.selectedVoiceURI || "");
+        setAgentName(config.agentName || "Sara");
+        setAgentSummary(config.agentSummary || "");
+        setOpeningLine(config.openingLine || "Hello, how can I help today?");
+        setAssumptions(config.assumptions || []);
+        setFlowNodes(loadedFlow);
+        setProtectedRouteIds(config.protectedRouteIds || []);
+        setLiveMessages(config.liveMessages || []);
+        setSelectedNodeId(firstRoute.id);
+        setNodeTitleDraft(firstRoute.title);
+        setNodeConditionDraft(firstRoute.condition);
+        setNodeActionDraft(firstRoute.action);
+        setNodeTestDraft(firstRoute.test_utterance);
+        setAgentId(payload.id || requestedId);
+        setSavedAt(payload.saved_at || "");
+        setLastStructuralFingerprint(configurationFingerprint({
+          websiteUrl: config.websiteUrl || config.business.url,
+          outcome: config.business.outcome,
+          primaryUseCase: config.primaryUseCase || "Help me choose",
+          agentChannel: config.agentChannel || "Inbound phone",
+          agentSubtype: config.agentSubtype || "Receptionist + sales",
+          companyDescription: config.companyDescription || "",
+          additionalKnowledge: config.additionalKnowledge || "",
+          knowledgeDocuments: config.knowledgeDocuments || [],
+          optionalFeatures: config.optionalFeatures || [],
+          customFlows: config.customFlows || "",
+        }));
+        setStage("studio");
+        setStudioView("logic");
+        setNotice({ kind: "success", message: "Saved agent restored." });
+      })
+      .catch((error) => setNotice({ kind: "error", message: error instanceof Error ? error.message : "The saved agent could not be loaded." }));
+  }, []);
 
   useEffect(() => {
     if (stage !== "building") return;
@@ -270,17 +420,32 @@ export default function Home() {
     return `${minutes}:${remaining}`;
   }, [seconds]);
 
+  const activeLanguages = useMemo(() => {
+    const ordered = languages.includes(primaryLanguage) ? [primaryLanguage, ...languages.filter((language) => language !== primaryLanguage)] : languages;
+    return ordered.map((language) => language === "Other" ? otherLanguage.trim() || "Other" : language);
+  }, [languages, primaryLanguage, otherLanguage]);
+  const approvedKnowledge = useMemo(() => [
+    websiteKnowledge ? `[Website snapshot: ${websiteUrl}]\n${websiteKnowledge}` : "",
+    companyDescription ? `[Company description]\n${companyDescription}` : "",
+    additionalKnowledge ? `[Additional approved knowledge]\n${additionalKnowledge}` : "",
+    ...knowledgeDocuments.filter((document) => document.text).map((document) => `[${document.name}]\n${document.text}`),
+  ].filter(Boolean).join("\n\n").slice(0, 22000), [websiteKnowledge, websiteUrl, companyDescription, additionalKnowledge, knowledgeDocuments]);
   const configuredContext = useMemo(() => [
     `Primary outcome: ${business.outcome}`,
+    `Primary use case: ${primaryUseCase}`,
     `Agent channel: ${agentChannel}`,
     `Agent role: ${agentSubtype}`,
-    `Languages: ${languages.join(", ")}`,
+    `Languages: ${activeLanguages.join(", ")}`,
     `Persona: ${voicePersona} (${voiceGender})`,
     companyDescription ? `Company description: ${companyDescription}` : "",
     additionalKnowledge ? `Additional approved knowledge: ${additionalKnowledge}` : "",
     optionalFeatures.length ? `Enabled features: ${optionalFeatures.join(", ")}` : "",
     customFlows ? `Conversation rules: ${customFlows}` : "",
-  ].filter(Boolean).join("\n"), [business.outcome, agentChannel, agentSubtype, languages, voicePersona, voiceGender, companyDescription, additionalKnowledge, optionalFeatures, customFlows]);
+  ].filter(Boolean).join("\n"), [business.outcome, primaryUseCase, agentChannel, agentSubtype, activeLanguages, voicePersona, voiceGender, companyDescription, additionalKnowledge, optionalFeatures, customFlows]);
+  const structuralFingerprint = useMemo(() => configurationFingerprint({
+    websiteUrl, outcome: business.outcome, primaryUseCase, agentChannel, agentSubtype, companyDescription,
+    additionalKnowledge, knowledgeDocuments, optionalFeatures, customFlows,
+  }), [websiteUrl, business.outcome, primaryUseCase, agentChannel, agentSubtype, companyDescription, additionalKnowledge, knowledgeDocuments, optionalFeatures, customFlows]);
 
   const compatibleFeatureOptions = agentSubtype === "Customer support"
     ? ["Escalate to human operator"]
@@ -305,6 +470,140 @@ export default function Home() {
     noticeTimerRef.current = window.setTimeout(() => setNotice(null), 2800);
   }
 
+  function buildConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
+    return {
+      version: 1,
+      owner: { name: ownerName.trim(), email: ownerEmail.trim(), phone: ownerPhone.trim() },
+      business,
+      companyName: companyName.trim() || business.name,
+      websiteUrl: websiteUrl.trim() || business.url,
+      websiteKnowledge,
+      websiteReadAt,
+      companyDescription,
+      additionalKnowledge,
+      knowledgeDocuments,
+      primaryUseCase,
+      agentChannel,
+      agentSubtype,
+      optionalFeatures,
+      customFlows,
+      languages,
+      primaryLanguage,
+      otherLanguage,
+      voiceGender,
+      voicePersona,
+      avatarChoice,
+      selectedVoiceURI,
+      agentName,
+      agentSummary,
+      openingLine,
+      assumptions,
+      flowNodes,
+      protectedRouteIds,
+      liveMessages: liveMessages.slice(-20),
+      ...overrides,
+    };
+  }
+
+  async function persistConfig(config: AgentConfig, announce = true) {
+    setSaving(true);
+    try {
+      const response = await fetch(`${studioApi}/save`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: agentId || undefined, config }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.detail || "The agent could not be saved.");
+      setAgentId(payload.id);
+      setSavedAt(payload.saved_at);
+      window.history.replaceState({}, "", `/?agent=${encodeURIComponent(payload.id)}`);
+      if (announce) showNotice("Agent saved. This URL now restores the complete configuration.");
+    } catch (error) {
+      showNotice(error instanceof Error ? error.message : "The agent could not be saved.", "error");
+      throw error;
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function requestGeneration(nextBusiness: Business, existingFlow: FlowNode[] = flowNodes): Promise<GeneratedAgent> {
+    const response = await fetch(`${studioApi}/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        website: nextBusiness.host === "yourcompany.com" ? "" : nextBusiness.url,
+        outcome: nextBusiness.outcome,
+        use_case: primaryUseCase,
+        channel: agentChannel,
+        subtype: agentSubtype,
+        languages: activeLanguages,
+        company_description: companyDescription,
+        additional_knowledge: additionalKnowledge,
+        documents: knowledgeDocuments,
+        optional_features: optionalFeatures,
+        custom_flows: customFlows,
+        existing_flow: existingFlow.map((node) => ({ id: node.id, kind: node.kind, title: node.title, condition: node.condition, action: node.action, test_utterance: node.test_utterance })),
+        protected_route_ids: protectedRouteIds,
+      }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.detail || "The agent could not be generated.");
+    return payload as GeneratedAgent;
+  }
+
+  function changedRouteCount(before: FlowNode[], after: FlowNode[]): number {
+    const previous = new Map(before.map((node) => [node.id, JSON.stringify(node)]));
+    return after.filter((node) => previous.get(node.id) !== JSON.stringify(node)).length
+      + before.filter((node) => !after.some((candidate) => candidate.id === node.id)).length;
+  }
+
+  async function regenerateAgent(nextBusiness: Business) {
+    setRebuilding(true);
+    try {
+      const generated = await requestGeneration(nextBusiness);
+      const nextFlow = generated.flow?.length
+        ? generated.flow.map((node) => ({ ...node, icon: flowIcons[node.kind] || "✦" }))
+        : flowNodes;
+      const firstRoute = nextFlow.find((node) => node.kind === "route") || nextFlow[0];
+      const nextWebsiteKnowledge = generated.source?.excerpt || websiteKnowledge;
+      const nextWebsiteReadAt = generated.source?.read_at || websiteReadAt;
+      const nextAgentName = generated.agent_name || agentName;
+      const nextSummary = generated.summary || agentSummary;
+      const nextOpening = generated.opening_line || openingLine;
+      const nextAssumptions = generated.assumptions || assumptions;
+      const changes = changedRouteCount(flowNodes, nextFlow);
+      setBusiness(nextBusiness);
+      setWebsiteKnowledge(nextWebsiteKnowledge);
+      setWebsiteReadAt(nextWebsiteReadAt);
+      setAgentName(nextAgentName);
+      setAgentSummary(nextSummary);
+      setOpeningLine(nextOpening);
+      setAssumptions(nextAssumptions);
+      setFlowNodes(nextFlow);
+      setSelectedNodeId(firstRoute.id);
+      setNodeTitleDraft(firstRoute.title);
+      setNodeConditionDraft(firstRoute.condition);
+      setNodeActionDraft(firstRoute.action);
+      setNodeTestDraft(firstRoute.test_utterance);
+      setLastStructuralFingerprint(structuralFingerprint);
+      await persistConfig(buildConfig({
+        business: nextBusiness,
+        websiteKnowledge: nextWebsiteKnowledge,
+        websiteReadAt: nextWebsiteReadAt,
+        agentName: nextAgentName,
+        agentSummary: nextSummary,
+        openingLine: nextOpening,
+        assumptions: nextAssumptions,
+        flowNodes: nextFlow,
+      }), false);
+      setUpdates((current) => [`Configuration applied: ${changes} route${changes === 1 ? "" : "s"} changed`, ...current]);
+      showNotice(changes ? `${changes} conversation routes updated; your manual edits were preserved.` : "Configuration updated; conversation routes were preserved.");
+    } finally {
+      setRebuilding(false);
+    }
+  }
+
   async function createAgent(event: FormEvent) {
     event.preventDefault();
     const cleanBrief = brief.trim();
@@ -316,20 +615,10 @@ export default function Home() {
     setStage("building");
     window.localStorage.setItem("strategyos-last-brief", cleanBrief);
     try {
-      const [response] = await Promise.all([
-        fetch(`${studioApi}/generate`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            website: nextBusiness.host === "yourcompany.com" ? "" : nextBusiness.url,
-            outcome: nextBusiness.outcome,
-          }),
-        }),
+      const [generated] = await Promise.all([
+        requestGeneration(nextBusiness, []),
         new Promise((resolve) => window.setTimeout(resolve, 3000)),
       ]);
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.detail || "The agent could not be generated.");
-      const generated = payload as GeneratedAgent;
       const nextFlow = generated.flow?.length
         ? generated.flow.map((node) => ({ ...node, icon: flowIcons[node.kind] || "✦" }))
         : makeFlow(nextBusiness);
@@ -346,14 +635,48 @@ export default function Home() {
       setAssumptions(generated.assumptions || []);
       setCompanyName(nextBusiness.name);
       setWebsiteUrl(nextBusiness.url);
+      setWebsiteKnowledge(generated.source?.excerpt || "");
+      setWebsiteReadAt(generated.source?.read_at || "");
       setCompanyDescription(generated.summary || `Designed to ${nextBusiness.outcome}`);
-      setAdditionalKnowledge((generated.assumptions || []).join("\n"));
-      setKnowledgeFiles([]);
+      setAdditionalKnowledge("");
+      setKnowledgeDocuments([]);
+      setProtectedRouteIds([]);
+      setAgentId("");
+      setSavedAt("");
+      setLastStructuralFingerprint(configurationFingerprint({
+        websiteUrl: nextBusiness.url,
+        outcome: nextBusiness.outcome,
+        primaryUseCase,
+        agentChannel,
+        agentSubtype,
+        companyDescription: generated.summary || `Designed to ${nextBusiness.outcome}`,
+        additionalKnowledge: "",
+        knowledgeDocuments: [],
+        optionalFeatures,
+        customFlows,
+      }));
       setStudioView("logic");
       setLiveMessages([]);
       setActiveNodeId("");
       setActiveDecision("");
       setStage("studio");
+      void persistConfig(buildConfig({
+        business: nextBusiness,
+        companyName: nextBusiness.name,
+        websiteUrl: nextBusiness.url,
+        websiteKnowledge: generated.source?.excerpt || "",
+        websiteReadAt: generated.source?.read_at || "",
+        companyDescription: generated.summary || `Designed to ${nextBusiness.outcome}`,
+        additionalKnowledge: "",
+        knowledgeDocuments: [],
+        agentName: generated.agent_name || "Sara",
+        agentSummary: generated.summary || `Designed to ${nextBusiness.outcome}`,
+        openingLine: generated.opening_line || "Hello, how can I help today?",
+        assumptions: generated.assumptions || [],
+        flowNodes: nextFlow,
+        protectedRouteIds: [],
+        liveMessages: [],
+      }), false);
     } catch (error) {
       setGenerationError(error instanceof Error ? error.message : "The agent could not be generated.");
     }
@@ -373,6 +696,30 @@ export default function Home() {
     setActiveDecision("");
     setShowLaunch(false);
     setStudioView("logic");
+    setAgentId("");
+    setSavedAt("");
+    setWebsiteUrl("");
+    setWebsiteKnowledge("");
+    setWebsiteReadAt("");
+    setCompanyName("");
+    setCompanyDescription("");
+    setAdditionalKnowledge("");
+    setKnowledgeDocuments([]);
+    setPrimaryUseCase("Help me choose");
+    setAgentChannel("Inbound phone");
+    setAgentSubtype("Receptionist + sales");
+    setOptionalFeatures(["Email orders to your inbox"]);
+    setCustomFlows("");
+    setLanguages(["English"]);
+    setPrimaryLanguage("English");
+    setOtherLanguage("");
+    setAgentName("Sara");
+    setAgentSummary("");
+    setOpeningLine("Hello, how can I help today?");
+    setAssumptions([]);
+    setProtectedRouteIds([]);
+    setLastStructuralFingerprint("");
+    window.history.replaceState({}, "", "/");
   }
 
   function startCall() {
@@ -380,6 +727,7 @@ export default function Home() {
     setCalling(true);
     setSeconds(0);
     setScenario("opening");
+    setHandoffQueued(false);
     setLiveMessages([{ role: "assistant", content: openingLine }]);
     setActiveNodeId(flowNodes.find((node) => node.kind === "entry")?.id || "");
     setActiveDecision("Conversation opened; waiting for customer intent.");
@@ -393,6 +741,7 @@ export default function Home() {
     setSeconds(0);
     setActiveNodeId("");
     setActiveDecision("");
+    setHandoffQueued(false);
     stopListening();
     window.speechSynthesis?.cancel();
     showNotice("Live test ended.", "info");
@@ -419,7 +768,8 @@ export default function Home() {
     recognition.continuous = false;
     recognition.interimResults = true;
     recognition.maxAlternatives = 1;
-    recognition.lang = availableVoices.find((voice) => voice.voiceURI === selectedVoiceURI)?.lang || navigator.language || "en-US";
+    const recognitionLanguage = primaryLanguage === "Other" ? otherLanguage.trim() : primaryLanguage;
+    recognition.lang = languageLocales[recognitionLanguage] || availableVoices.find((voice) => voice.voiceURI === selectedVoiceURI)?.lang || navigator.language || "en-US";
     recognition.onstart = () => {
       setListening(true);
       setChatError("");
@@ -498,6 +848,16 @@ export default function Home() {
     window.speechSynthesis.cancel();
     window.speechSynthesis.speak(preview);
     showNotice(`Playback voice changed to ${voice?.name || "browser default"}.`, "info");
+    void persistConfig(buildConfig({ selectedVoiceURI: voiceURI }), false);
+  }
+
+  function testCurrentVoice() {
+    if (!("speechSynthesis" in window)) {
+      showNotice("This browser has no speech playback. Typed conversation still works.", "info");
+      return;
+    }
+    speak(`Hi, I’m ${agentName}. I’m ready to help in ${activeLanguages.join(" and ")}.`);
+    showNotice("Playing the selected browser voice.", "info");
   }
 
   function selectNode(id: string) {
@@ -520,9 +880,13 @@ export default function Home() {
       action: nodeActionDraft.trim(),
       test_utterance: nodeTestDraft.trim() || "Can you help me?",
     };
-    setFlowNodes((current) => current.map((node) => node.id === selectedNodeId ? { ...node, ...nextNode } : node));
+    const nextFlow = flowNodes.map((node) => node.id === selectedNodeId ? { ...node, ...nextNode } : node);
+    const nextProtected = protectedRouteIds.includes(selectedNodeId) ? protectedRouteIds : [...protectedRouteIds, selectedNodeId];
+    setFlowNodes(nextFlow);
+    setProtectedRouteIds(nextProtected);
     setUpdates((current) => [`${nextNode.title}: ${nextNode.action}`, ...current]);
     showNotice(`${nextNode.title} saved. The live test now routes through this rule.`);
+    void persistConfig(buildConfig({ flowNodes: nextFlow, protectedRouteIds: nextProtected }), false);
   }
 
   function addRoute() {
@@ -541,11 +905,11 @@ export default function Home() {
       test_utterance: "I need help with this.",
       icon: flowIcons.route,
     };
-    setFlowNodes((current) => {
-      const fallbackIndex = current.findIndex((node) => node.kind === "fallback");
-      if (fallbackIndex < 0) return [...current, nextNode];
-      return [...current.slice(0, fallbackIndex), nextNode, ...current.slice(fallbackIndex)];
-    });
+    const fallbackIndex = flowNodes.findIndex((node) => node.kind === "fallback");
+    const nextFlow = fallbackIndex < 0 ? [...flowNodes, nextNode] : [...flowNodes.slice(0, fallbackIndex), nextNode, ...flowNodes.slice(fallbackIndex)];
+    const nextProtected = [...protectedRouteIds, id];
+    setFlowNodes(nextFlow);
+    setProtectedRouteIds(nextProtected);
     setSelectedNodeId(id);
     setNodeTitleDraft(nextNode.title);
     setNodeConditionDraft(nextNode.condition);
@@ -553,6 +917,7 @@ export default function Home() {
     setNodeTestDraft(nextNode.test_utterance);
     setUpdates((current) => ["Added a new customer route", ...current]);
     showNotice("New route added. Define when it matches and what the agent should do.", "info");
+    void persistConfig(buildConfig({ flowNodes: nextFlow, protectedRouteIds: nextProtected }), false);
   }
 
   function removeSelectedRoute() {
@@ -562,6 +927,7 @@ export default function Home() {
       return;
     }
     const remaining = flowNodes.filter((node) => node.id !== selectedNodeId);
+    const nextProtected = protectedRouteIds.filter((id) => id !== selectedNodeId);
     const nextSelection = remaining.find((node) => node.kind === "route") || remaining[0];
     setFlowNodes(remaining);
     setSelectedNodeId(nextSelection.id);
@@ -569,8 +935,19 @@ export default function Home() {
     setNodeConditionDraft(nextSelection.condition);
     setNodeActionDraft(nextSelection.action);
     setNodeTestDraft(nextSelection.test_utterance);
+    setProtectedRouteIds(nextProtected);
     setUpdates((current) => [`Removed route: ${selectedNode.title}`, ...current]);
     showNotice(`${selectedNode.title} removed.`);
+    void persistConfig(buildConfig({ flowNodes: remaining, protectedRouteIds: nextProtected }), false);
+  }
+
+  function choosePrimaryUseCase(useCase: PrimaryUseCase) {
+    setPrimaryUseCase(useCase);
+    if (useCase === "Answer incoming calls") { setAgentChannel("Inbound phone"); setAgentSubtype("Receptionist + sales"); }
+    if (useCase === "Support customers") { setAgentChannel("Inbound phone"); setAgentSubtype("Customer support"); }
+    if (useCase === "Qualify leads") { setAgentSubtype("Lead qualification"); }
+    if (useCase === "Follow up and sell") { setAgentChannel("Outbound phone"); setAgentSubtype("Outbound sales"); }
+    if (useCase === "Help website visitors") { setAgentChannel("Website voice + text"); setAgentSubtype("Q&A"); }
   }
 
   function chooseChannel(channel: AgentChannel) {
@@ -594,34 +971,93 @@ export default function Home() {
       showNotice("Your agent needs at least one language.", "info");
       return;
     }
-    setLanguages((current) => current.includes(language) ? current.filter((item) => item !== language) : [...current, language]);
+    if (languages.includes(language)) {
+      const next = languages.filter((item) => item !== language);
+      setLanguages(next);
+      if (primaryLanguage === language) setPrimaryLanguage(next[0]);
+      return;
+    }
+    setLanguages((current) => [...current, language]);
+    setPrimaryLanguage(language);
+    const locale = language === "Other" ? "" : languageLocales[language];
+    const voice = locale ? availableVoices.find((item) => item.lang.toLowerCase().startsWith(locale.slice(0, 2).toLowerCase())) : undefined;
+    if (voice) setSelectedVoiceURI(voice.voiceURI);
   }
 
   async function attachKnowledge(event: ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(event.target.files || []);
+    const input = event.target;
+    const files = Array.from(input.files || []).slice(0, Math.max(0, 8 - knowledgeDocuments.length));
     if (!files.length) return;
-    setKnowledgeFiles((current) => [...current, ...files.map((file) => file.name)].slice(-8));
-    const readable = files.filter((file) => file.type.startsWith("text/") || /\.(txt|md)$/i.test(file.name));
-    if (readable.length) {
-      const contents = await Promise.all(readable.map(async (file) => `\n\n[${file.name}]\n${(await file.text()).slice(0, 16000)}`));
-      setAdditionalKnowledge((current) => `${current}${contents.join("")}`.trim());
+    setKnowledgeBusy(true);
+    const processed: KnowledgeDocument[] = [];
+    try {
+      for (const file of files) {
+        const form = new FormData();
+        form.append("file", file);
+        const response = await fetch(`${studioApi}/knowledge`, { method: "POST", body: form });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(`${file.name}: ${payload.detail || "could not be processed"}`);
+        processed.push({ name: payload.name, text: payload.text, status: payload.status, characters: payload.characters });
+      }
+      setKnowledgeDocuments((current) => [...current.filter((item) => !processed.some((next) => next.name === item.name)), ...processed].slice(-8));
+      showNotice(`${processed.length} knowledge file${processed.length === 1 ? "" : "s"} processed and ready for the agent.`);
+    } catch (error) {
+      showNotice(error instanceof Error ? error.message : "The knowledge files could not be processed.", "error");
+    } finally {
+      setKnowledgeBusy(false);
+      input.value = "";
     }
-    event.target.value = "";
-    showNotice(`${files.length} knowledge file${files.length === 1 ? "" : "s"} attached.`);
   }
 
-  function saveConfiguration(event: FormEvent) {
+  function removeKnowledge(name: string) {
+    const nextDocuments = knowledgeDocuments.filter((document) => document.name !== name);
+    setKnowledgeDocuments(nextDocuments);
+    void persistConfig(buildConfig({ knowledgeDocuments: nextDocuments }), false);
+    showNotice(`${name} removed from approved knowledge.`, "info");
+  }
+
+  async function saveConfiguration(event: FormEvent) {
     event.preventDefault();
     const urlBusiness = parseBusiness(`${websiteUrl || business.url} — ${business.outcome}`);
-    setBusiness((current) => ({
-      ...current,
+    const nextBusiness = {
+      ...business,
       host: urlBusiness.host,
       url: urlBusiness.url,
-      name: companyName.trim() || current.name,
-    }));
-    setUpdates((current) => [`Control Center: ${agentChannel}, ${agentSubtype}, ${languages.join(" + ")}`, ...current]);
-    setStudioView("logic");
-    showNotice("Agent settings saved. The live test is updated.");
+      name: companyName.trim() || business.name,
+    };
+    setBusiness(nextBusiness);
+    setUpdates((current) => [`Control Center: ${primaryUseCase}, ${agentChannel}, ${agentSubtype}, ${activeLanguages.join(" + ")}`, ...current]);
+    try {
+      if (structuralFingerprint !== lastStructuralFingerprint) await regenerateAgent(nextBusiness);
+      else {
+        await persistConfig(buildConfig({ business: nextBusiness }));
+        setLastStructuralFingerprint(structuralFingerprint);
+      }
+      setStudioView("logic");
+    } catch (error) {
+      showNotice(error instanceof Error ? error.message : "The configuration could not be applied.", "error");
+    }
+  }
+
+  async function openLaunch() {
+    if (!ownerName.trim() || !/^\S+@\S+\.\S+$/.test(ownerEmail.trim())) {
+      setStudioView("configure");
+      showNotice("Add your name and a valid work email before connecting the agent.", "info");
+      return;
+    }
+    try { await persistConfig(buildConfig(), false); }
+    catch { return; }
+    setShowLaunch(true);
+  }
+
+  async function copyShareLink() {
+    if (!agentId) {
+      try { await persistConfig(buildConfig(), false); }
+      catch { return; }
+    }
+    const link = window.location.href;
+    await navigator.clipboard.writeText(link);
+    showNotice("Shareable agent link copied.");
   }
 
   async function sendAgentMessage(message: string) {
@@ -646,6 +1082,7 @@ export default function Home() {
         body: JSON.stringify({
           business_name: `${companyName || business.name}; agent name: ${agentName}`,
           outcome: configuredContext,
+          approved_knowledge: approvedKnowledge,
           flow: flowNodes.map((node) => ({ id: node.id, kind: node.kind, title: node.title, condition: node.condition, action: node.action, test_utterance: node.test_utterance })),
           logic: [
             { id: "trigger", title: "Trigger", description: flowNodes.find((node) => node.kind === "entry")?.action || openingLine },
@@ -662,8 +1099,13 @@ export default function Home() {
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.detail || "The agent did not answer.");
       const reply = String(payload.reply || "I’m sorry, I could not answer that.");
-      setLiveMessages((current) => [...current, { role: "assistant", content: reply }]);
+      setLiveMessages((current) => {
+        const nextMessages: LiveMessage[] = [...current, { role: "assistant", content: reply }];
+        void persistConfig(buildConfig({ liveMessages: nextMessages }), false);
+        return nextMessages;
+      });
       setActiveNodeId(String(payload.active_node_id || flowNodes.find((node) => node.kind === "fallback")?.id || ""));
+      if (flowNodes.find((node) => node.id === String(payload.active_node_id))?.kind === "fallback") setHandoffQueued(false);
       setActiveDecision(String(payload.decision || "Matched the safest available route."));
       speak(reply);
     } catch (error) {
@@ -699,9 +1141,11 @@ export default function Home() {
         </div>
         {stage === "studio" ? (
           <div className="top-actions">
+            <span className="save-state">{saving ? "Saving…" : savedAt ? "Saved ✓" : "Not saved"}</span>
+            <button className="share-agent" type="button" onClick={() => void copyShareLink()}>Share</button>
             <button className="new-agent" type="button" onClick={startOver}>New agent</button>
             <button className="edit-agent-top" type="button" onClick={() => setStudioView("configure")}>✦ Edit agent</button>
-            <button className="launch-top" type="button" onClick={() => setShowLaunch(true)}>Connect &amp; go live</button>
+            <button className="launch-top" type="button" onClick={() => void openLaunch()}>Connect &amp; go live</button>
           </div>
         ) : <span className="prototype-badge">2027 concept</span>}
       </header>
@@ -809,7 +1253,7 @@ export default function Home() {
               </form>
               </> : (
                 <form className="control-center" onSubmit={saveConfiguration}>
-                  <div className="control-intro"><span>One workspace · zero steps</span><strong>Change anything. Test the result immediately.</strong><small>These settings are included in every live AI conversation.</small></div>
+                  <div className="control-intro"><span>One workspace · zero steps</span><strong>Change anything. Test the result immediately.</strong><small>{rebuilding ? "Refreshing knowledge and affected routes…" : structuralFingerprint !== lastStructuralFingerprint ? "Structural changes ready to apply; manual routes will be preserved." : "Everything shown here is used by the saved agent."}</small></div>
 
                   <section className="config-section">
                     <header><span>01</span><div><strong>Owner &amp; business</strong><small>Contact details from the original “You” step</small></div></header>
@@ -824,17 +1268,19 @@ export default function Home() {
                   <section className="config-section">
                     <header><span>02</span><div><strong>Knowledge</strong><small>Website context, editable description and documents</small></div></header>
                     <div className="config-grid">
-                      <label><span>Website URL</span><input type="url" value={websiteUrl} onChange={(event) => setWebsiteUrl(event.target.value)} placeholder="https://yourcompany.com" /></label>
+                      <label><span>Website URL</span><input type="url" value={websiteUrl} onChange={(event) => setWebsiteUrl(event.target.value)} placeholder="https://yourcompany.com" /><small className="field-status">{websiteKnowledge ? `✓ ${websiteKnowledge.length.toLocaleString()} characters indexed${websiteReadAt ? ` · refreshed ${new Date(websiteReadAt).toLocaleString()}` : ""}` : "The site will be read when changes are applied."}</small></label>
                       <label><span>Primary outcome</span><input value={business.outcome} onChange={(event) => setBusiness((current) => ({ ...current, outcome: event.target.value }))} /></label>
                       <label><span>Company description</span><textarea value={companyDescription} onChange={(event) => setCompanyDescription(event.target.value)} rows={3} placeholder="Services, pricing, hours, locations and common questions…" /></label>
                       <label><span>Additional approved knowledge</span><textarea value={additionalKnowledge} onChange={(event) => setAdditionalKnowledge(event.target.value)} rows={4} placeholder="Paste FAQs, policies, pricing or training notes…" /></label>
-                      <label className="file-drop"><span>Attach knowledge files</span><input type="file" accept=".pdf,.txt,.md,.docx,text/plain,text/markdown,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" multiple onChange={attachKnowledge} /><b>＋ Add PDF, TXT, MD or DOCX</b><small>TXT and MD content is added immediately; other files stay attached to this prototype.</small></label>
-                      {knowledgeFiles.length > 0 && <div className="file-chips">{knowledgeFiles.map((file) => <span key={file}>✓ {file}</span>)}</div>}
+                      <label className={`file-drop ${knowledgeBusy ? "is-busy" : ""}`}><span>Attach knowledge files</span><input type="file" accept=".pdf,.txt,.md,.docx,text/plain,text/markdown,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" multiple disabled={knowledgeBusy} onChange={attachKnowledge} /><b>{knowledgeBusy ? "Extracting readable content…" : "＋ Add PDF, TXT, MD or DOCX"}</b><small>Every supported file is parsed and becomes approved knowledge for generation and live answers.</small></label>
+                      {knowledgeDocuments.length > 0 && <div className="file-chips">{knowledgeDocuments.map((file) => <span key={file.name}>✓ {file.name} · {(file.characters || file.text.length).toLocaleString()} chars<button type="button" onClick={() => removeKnowledge(file.name)} aria-label={`Remove ${file.name}`}>×</button></span>)}</div>}
                     </div>
                   </section>
 
                   <section className="config-section">
                     <header><span>03</span><div><strong>Agent type</strong><small>Channel, job and optional behavior</small></div></header>
+                    <div className="config-subgroup"><span>Primary use case</span><div className="usecase-grid">{primaryUseCaseOptions.map((useCase) => <button type="button" key={useCase.name} className={primaryUseCase === useCase.name ? "selected" : ""} aria-pressed={primaryUseCase === useCase.name} onClick={() => choosePrimaryUseCase(useCase.name)}><strong>{useCase.name}</strong><small>{useCase.detail}</small></button>)}</div></div>
+                    <div className="config-subgroup"><span>Channel</span></div>
                     <div className="channel-grid">
                       {channelOptions.map((channel) => <button type="button" key={channel.name} className={agentChannel === channel.name ? "selected" : ""} aria-pressed={agentChannel === channel.name} onClick={() => chooseChannel(channel.name)}><strong>{channel.name}</strong><small>{channel.detail}</small></button>)}
                     </div>
@@ -850,7 +1296,8 @@ export default function Home() {
 
                   <section className="config-section">
                     <header><span>05</span><div><strong>Voice &amp; persona</strong><small>Languages, gender, named voice, avatar and greeting</small></div></header>
-                    <div className="config-subgroup"><span>Languages</span><div className="language-grid">{languageOptions.map((language) => <button type="button" key={language} className={languages.includes(language) ? "selected" : ""} aria-pressed={languages.includes(language)} onClick={() => toggleLanguage(language)}>{language}</button>)}</div></div>
+                    <div className="config-subgroup"><span>Primary language &amp; additional languages <i>selecting a new language makes it primary</i></span><div className="language-grid">{languageOptions.map((language) => <button type="button" key={language} className={`${languages.includes(language) ? "selected" : ""} ${primaryLanguage === language ? "is-primary" : ""}`} aria-pressed={languages.includes(language)} onClick={() => toggleLanguage(language)}>{language}{primaryLanguage === language && <small>Primary</small>}</button>)}</div></div>
+                    {languages.includes("Other") && <label className="full-field"><span>Other language</span><input value={otherLanguage} onChange={(event) => setOtherLanguage(event.target.value)} placeholder="Enter language and preferred locale" required /></label>}
                     <div className="config-subgroup"><span>Gender</span><div className="choice-row">{(["Female", "Male"] as VoiceGender[]).map((gender) => <button type="button" key={gender} className={voiceGender === gender ? "selected" : ""} aria-pressed={voiceGender === gender} onClick={() => { setVoiceGender(gender); setVoicePersona(voicePersonas[gender][0].name); setAvatarChoice(1); }}>{gender} voice + avatar</button>)}</div></div>
                     <div className="config-subgroup"><span>Voice persona</span><div className="persona-grid">{voicePersonas[voiceGender].map((persona) => <button type="button" key={persona.name} className={voicePersona === persona.name ? "selected" : ""} aria-pressed={voicePersona === persona.name} onClick={() => setVoicePersona(persona.name)}><strong>{persona.name}</strong><small>{persona.tone}</small></button>)}</div></div>
                     <div className="config-subgroup avatar-picker"><span>Choose a face</span><div>{avatarOptions[voiceGender].map((avatar, index) => <button type="button" key={avatar.src} className={avatarChoice === index + 1 ? "selected" : ""} onClick={() => setAvatarChoice(index + 1)} aria-label={avatar.label} aria-pressed={avatarChoice === index + 1}><img src={avatar.src} alt="" loading="lazy" /><i>✓</i></button>)}</div></div>
@@ -860,7 +1307,7 @@ export default function Home() {
                     <label className="full-field"><span>Opening line</span><textarea value={openingLine} onChange={(event) => setOpeningLine(event.target.value)} rows={2} /></label>
                   </section>
 
-                  <footer className="control-actions"><span>{languages.length} languages · {knowledgeFiles.length} files · {optionalFeatures.length} optional features</span><button type="submit">Save agent &amp; return to logic →</button></footer>
+                  <footer className="control-actions"><span>{activeLanguages.length} languages · {knowledgeDocuments.length} processed files · {protectedRouteIds.length} protected manual edits</span><button type="submit" disabled={saving || rebuilding || knowledgeBusy}>{rebuilding ? "Updating affected routes…" : saving ? "Saving…" : structuralFingerprint !== lastStructuralFingerprint ? "Apply changes & update routes →" : "Save agent & return to logic →"}</button></footer>
                 </form>
               )}
             </section>
@@ -873,6 +1320,8 @@ export default function Home() {
                 <select id="agent-voice" value={selectedVoiceURI} onChange={(event) => chooseVoice(event.target.value)} disabled={availableVoices.length === 0}>
                   {availableVoices.length === 0 ? <option>Browser default</option> : availableVoices.map((voice) => <option key={voice.voiceURI} value={voice.voiceURI}>{voice.name} · {voice.lang}</option>)}
                 </select>
+                <button type="button" onClick={testCurrentVoice}>Test voice</button>
+                <small>{availableVoices.length ? `${availableVoices.length} device voices · recognition ${languageLocales[activeLanguages[0]] || activeLanguages[0]}` : "No device voice detected; typed conversation remains available."}</small>
               </div>
               <div className="voice-orb" aria-hidden="true"><span><i /><i /><i /><i /><i /><i /><i /><i /><i /></span></div>
               <div className="connected"><span>✓</span>{listening ? "Listening" : chatBusy ? "Agent is thinking" : calling ? "Test active" : "Ready to test"}</div>
@@ -888,6 +1337,8 @@ export default function Home() {
                 </div>
               ) : <div className="test-prompt"><strong>Test your edited agent here.</strong><span>Start a live test, or choose a ready-made scenario below.</span></div>}
 
+              {calling && activeNode?.kind === "fallback" && <div className={`handoff-demo ${handoffQueued ? "is-queued" : ""}`}><div><strong>{handoffQueued ? "✓ Human follow-up queued" : "Human handoff available"}</strong><small>{handoffQueued ? "The transcript and caller context were captured in this demo session." : "Simulate the operational handoff configured by this route."}</small></div><button type="button" disabled={handoffQueued} onClick={() => { setHandoffQueued(true); setUpdates((current) => ["Human handoff queued from live test", ...current]); showNotice("Demo handoff queued with the conversation context."); }}>{handoffQueued ? "Queued" : "Queue handoff"}</button></div>}
+
               <span className="scenario-label">Test a generated route</span>
               <div className="scenario-buttons studio-scenarios" aria-label="Test scenarios">
                 {flowNodes.filter((node) => node.kind !== "entry").map((node) => <button key={node.id} type="button" disabled={chatBusy} aria-pressed={scenario === node.id} onClick={() => runScenario(node)}>{node.title}</button>)}
@@ -895,7 +1346,7 @@ export default function Home() {
               {calling && <form className="live-chat-form" onSubmit={submitChat}><label className="sr-only" htmlFor="live-message">Talk to the agent</label><input id="live-message" value={chatInput} onChange={(event) => setChatInput(event.target.value)} placeholder="Type what you would say…" /><button type="submit" disabled={chatBusy || !chatInput.trim()}>{chatBusy ? "Waiting…" : "Send"}</button></form>}
               <div className="call-controls">{!calling ? <button className="start-test" type="button" onClick={startCall}>▶ Start live test</button> : <><button className={`mic-toggle ${listening ? "listening" : ""}`} type="button" onClick={toggleListening} disabled={!micSupported} aria-label={listening ? "Stop listening" : "Speak with microphone"}>{listening ? "■ Stop listening" : "🎙 Speak"}</button><button className="end-call" type="button" onClick={endCall}>End test</button></>}</div>
               <div className="mic-status">{!micSupported ? "Microphone unavailable in this browser — typed chat still works." : listening ? "Listening — speak now" : calling ? "Use Speak or type a message above." : "No microphone permission is requested until you tap Speak."}</div>
-              <div className="test-foot"><span>{updates.length} edits in this session</span><button type="button" onClick={() => setShowLaunch(true)}>Approve agent →</button></div>
+              <div className="test-foot"><span>{savedAt ? `Saved ${new Date(savedAt).toLocaleTimeString()}` : `${updates.length} edits in this session`}</span><button type="button" onClick={() => void openLaunch()}>Approve agent →</button></div>
             </aside>
           </section>
           <footer className="site-footer"><span>StrategyOS prototype · August 2026</span><span>The product does the work. The human approves decisions.</span></footer>
