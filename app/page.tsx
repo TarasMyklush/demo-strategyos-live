@@ -267,6 +267,8 @@ export default function Home() {
   const noticeTimerRef = useRef<number | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [showLaunch, setShowLaunch] = useState(false);
+  const [showShare, setShowShare] = useState(false);
+  const [shareLink, setShareLink] = useState("");
   const [studioView, setStudioView] = useState<StudioView>("logic");
   const [ownerName, setOwnerName] = useState("");
   const [ownerEmail, setOwnerEmail] = useState("");
@@ -765,12 +767,16 @@ export default function Home() {
     window.speechSynthesis?.cancel();
     recognitionRef.current?.abort();
     const recognition = new Recognition();
+    let recognitionStarted = false;
+    let startTimeout = 0;
     recognition.continuous = false;
     recognition.interimResults = true;
     recognition.maxAlternatives = 1;
     const recognitionLanguage = primaryLanguage === "Other" ? otherLanguage.trim() : primaryLanguage;
     recognition.lang = languageLocales[recognitionLanguage] || availableVoices.find((voice) => voice.voiceURI === selectedVoiceURI)?.lang || navigator.language || "en-US";
     recognition.onstart = () => {
+      recognitionStarted = true;
+      window.clearTimeout(startTimeout);
       setListening(true);
       setChatError("");
       setInterimTranscript("");
@@ -792,6 +798,7 @@ export default function Home() {
       }
     };
     recognition.onerror = (event) => {
+      window.clearTimeout(startTimeout);
       if (event.error === "aborted") return;
       const messages: Record<string, string> = {
         "not-allowed": "Microphone permission was denied. Allow it in the browser or use typed chat.",
@@ -804,6 +811,7 @@ export default function Home() {
       showNotice(messages[event.error] || event.message || "The microphone could not start.", "error");
     };
     recognition.onend = () => {
+      window.clearTimeout(startTimeout);
       setListening(false);
       setInterimTranscript("");
       if (recognitionRef.current === recognition) recognitionRef.current = null;
@@ -811,6 +819,13 @@ export default function Home() {
     recognitionRef.current = recognition;
     try {
       recognition.start();
+      startTimeout = window.setTimeout(() => {
+        if (recognitionRef.current !== recognition || recognitionStarted) return;
+        recognition.abort();
+        recognitionRef.current = null;
+        setChatError("The microphone did not start in this browser. Use typed chat or allow microphone access and try again.");
+        showNotice("The microphone did not start. Typed chat remains available.", "error");
+      }, 2500);
     } catch {
       setChatError("The microphone is already active. Try again in a moment.");
     }
@@ -1050,14 +1065,23 @@ export default function Home() {
     setShowLaunch(true);
   }
 
-  async function copyShareLink() {
+  async function openShareDialog() {
     if (!agentId) {
       try { await persistConfig(buildConfig(), false); }
       catch { return; }
     }
-    const link = window.location.href;
-    await navigator.clipboard.writeText(link);
-    showNotice("Shareable agent link copied.");
+    setShareLink(window.location.href);
+    setShowShare(true);
+  }
+
+  async function copyShareLink() {
+    const link = shareLink || window.location.href;
+    try {
+      await navigator.clipboard.writeText(link);
+      showNotice("Shareable agent link copied.");
+    } catch {
+      showNotice("Automatic copy is unavailable here. Select the link in the dialog and copy it.", "info");
+    }
   }
 
   async function sendAgentMessage(message: string) {
@@ -1142,7 +1166,7 @@ export default function Home() {
         {stage === "studio" ? (
           <div className="top-actions">
             <span className="save-state">{saving ? "Saving…" : savedAt ? "Saved ✓" : "Not saved"}</span>
-            <button className="share-agent" type="button" onClick={() => void copyShareLink()}>Share</button>
+            <button className="share-agent" type="button" onClick={() => void openShareDialog()}>Share</button>
             <button className="new-agent" type="button" onClick={startOver}>New agent</button>
             <button className="edit-agent-top" type="button" onClick={() => setStudioView("configure")}>✦ Edit agent</button>
             <button className="launch-top" type="button" onClick={() => void openLaunch()}>Connect &amp; go live</button>
@@ -1349,7 +1373,7 @@ export default function Home() {
               <div className="test-foot"><span>{savedAt ? `Saved ${new Date(savedAt).toLocaleTimeString()}` : `${updates.length} edits in this session`}</span><button type="button" onClick={() => void openLaunch()}>Approve agent →</button></div>
             </aside>
           </section>
-          <footer className="site-footer"><span>StrategyOS prototype · August 2026</span><span>The product does the work. The human approves decisions.</span></footer>
+          <footer className="site-footer"><span>Voice Agent Studio · 2027 concept</span><span>The product does the work. The human approves decisions.</span></footer>
         </>
       )}
 
@@ -1360,6 +1384,19 @@ export default function Home() {
             <h2 id="launch-title">The prototype is approved. Now connect only what it needs.</h2><p>No credentials were requested before you experienced the product.</p>
             <div className="connection-list"><div><span>01</span><div><strong>Phone line</strong><small>Receive and transfer calls</small></div><b>Configured at launch</b></div><div><span>02</span><div><strong>Calendar</strong><small>Offer and book available slots</small></div><b>Configured at launch</b></div><div><span>03</span><div><strong>CRM</strong><small>Save context and outcomes</small></div><b>Optional</b></div></div>
             <button className="approve-launch" type="button" onClick={() => setShowLaunch(false)}>Close preview</button><small className="modal-footnote">Prototype only — no external systems will be connected.</small>
+          </section>
+        </div>
+      )}
+      {showShare && (
+        <div className="modal-backdrop">
+          <section className="launch-modal share-modal" role="dialog" aria-modal="true" aria-labelledby="share-title">
+            <button className="modal-close" type="button" aria-label="Close share dialog" onClick={() => setShowShare(false)}>×</button>
+            <span className="modal-kicker">Saved agent</span>
+            <h2 id="share-title">Share this working agent.</h2>
+            <p>Anyone with this private link can open the same configuration, inspect its logic, and run a live test.</p>
+            <label htmlFor="share-link">Shareable link</label>
+            <div className="share-link-row"><input id="share-link" value={shareLink} readOnly onFocus={(event) => event.currentTarget.select()} /><button type="button" onClick={() => void copyShareLink()}>Copy link</button></div>
+            <button className="approve-launch" type="button" onClick={() => setShowShare(false)}>Done</button>
           </section>
         </div>
       )}
