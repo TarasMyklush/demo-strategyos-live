@@ -46,12 +46,13 @@ test("persists and restores a standalone agent configuration", async () => {
   const dataRoot = await mkdtemp(path.join(os.tmpdir(), "voiceagent-test-"));
   try {
     const config = { version: 1, agentName: "Sara", business: { name: "Acme" }, flowNodes: [1, 2, 3, 4, 5] };
-    const saved = await worker.fetch(new Request("http://localhost/api/agent/save", {
-      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ config }),
+    const saved = await worker.fetch(new Request("http://localhost:3101/api/agent/save", {
+      method: "POST", headers: { "content-type": "application/json", "x-forwarded-proto": "https", "x-forwarded-host": "voiceagent.example" }, body: JSON.stringify({ config }),
     }), environment({ AGENT_DATA_DIR: dataRoot }), context);
     assert.equal(saved.status, 200);
     const savedBody = await saved.json();
     assert.match(savedBody.id, /^[a-z0-9-]{8,}$/);
+    assert.equal(savedBody.share_url, `https://voiceagent.example/?agent=${savedBody.id}`);
     const loaded = await worker.fetch(new Request(`http://localhost/api/agent/load?id=${savedBody.id}`), environment({ AGENT_DATA_DIR: dataRoot }), context);
     assert.equal(loaded.status, 200);
     assert.deepEqual((await loaded.json()).config, config);
